@@ -9,13 +9,17 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "realtime:dev": "tsx realtime/src/server.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@google-cloud/vertexai": "^1.10.0",
     "@prisma/client": "^6.8.0",
+    "@sentry/node": "^9.47.1",
     "@socket.io/redis-adapter": "^8.3.0",
     "@tanstack/react-virtual": "^3.13.8",
     "@upstash/redis": "^1.35.0",
@@ -29,6 +33,7 @@
     "prisma": "^6.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "redis": "^4.7.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "zod": "^3.25.7"
@@ -37,8 +42,10 @@
     "@types/node": "^22.15.18",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
+    "@playwright/test": "^1.52.0",
     "tailwindcss": "^4.1.7",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
   }
 }

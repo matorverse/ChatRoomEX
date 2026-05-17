@@ -16,6 +16,8 @@ import {
 import { verifyAccessToken } from "../../lib/auth/jwt";
 import { moderateMessage } from "../../lib/security/moderation";
 import { fixedWindowRateLimit } from "../../lib/security/rate-limit";
+import { auditLog } from "../../lib/security/audit";
+import { clearSocketState, clearUnread, incrementUnreadForRoom, setSocketState, setTypingState } from "../../lib/realtime/redis-state";
 
 const log = pino({ name: "chatroomex-realtime" });
 const prisma = new PrismaClient();
@@ -68,6 +70,7 @@ async function authorizeRoom(userId: string, roomId: string) {
 
 io.on("connection", (socket) => {
   log.info({ socketId: socket.id, userId: socket.data.userId }, "socket connected");
+  void setSocketState(socket.data.sessionId, socket.id, socket.data.userId);
 
   socket.on("room:join", async ({ roomId }, ack) => {
     const member = await authorizeRoom(socket.data.userId, roomId);
@@ -140,6 +143,18 @@ io.on("connection", (socket) => {
       }
     });
 
+    const members = await prisma.roomMember.findMany({
+      where: { roomId: input.roomId },
+      select: { userId: true }
+    });
+    await incrementUnreadForRoom(input.roomId, socket.data.userId, members.map((member) => member.userId));
+    void auditLog({
+      actorId: socket.data.userId,
+      roomId: input.roomId,
+      action: "message.created",
+      metadata: { messageId: message.id, threadId: message.threadId }
+    });
+
     const payload = {
       id: message.id,
       roomId: message.roomId,
@@ -161,6 +176,7 @@ io.on("connection", (socket) => {
     const parsed = typingSchema.safeParse(raw);
     if (!parsed.success) return;
     if (!socket.rooms.has(`room:${parsed.data.roomId}`)) return;
+    await setTypingState(parsed.data.roomId, socket.data.userId, parsed.data.isTyping);
     socket.to(`room:${parsed.data.roomId}`).emit("typing:update", { ...parsed.data, userId: socket.data.userId });
   });
 
@@ -183,12 +199,42 @@ io.on("connection", (socket) => {
     if (existing) {
       await prisma.reaction.delete({ where: { id: existing.id } });
       io.to(`room:${parsed.data.roomId}`).emit("reaction:update", { ...parsed.data, userId: socket.data.userId, op: "remove" });
+      void auditLog({ actorId: socket.data.userId, roomId: parsed.data.roomId, action: "reaction.removed", metadata: parsed.data });
     } else {
       await prisma.reaction.create({
         data: { messageId: parsed.data.messageId, userId: socket.data.userId, emoji: parsed.data.emoji }
       });
       io.to(`room:${parsed.data.roomId}`).emit("reaction:update", { ...parsed.data, userId: socket.data.userId, op: "add" });
+      void auditLog({ actorId: socket.data.userId, roomId: parsed.data.roomId, action: "reaction.added", metadata: parsed.data });
     }
+  });
+
+  socket.on("read:mark", async ({ roomId, messageId }) => {
+    const member = await authorizeRoom(socket.data.userId, roomId);
+    if (!member) return;
+
+    const receipt = await prisma.readReceipt.upsert({
+      where: { roomId_userId_messageId: { roomId, userId: socket.data.userId, messageId } },
+      create: { roomId, userId: socket.data.userId, messageId },
+      update: { readAt: new Date() }
+    });
+    await clearUnread(socket.data.userId, roomId);
+    io.to(`room:${roomId}`).emit("read:receipt", {
+      roomId,
+      userId: socket.data.userId,
+      messageId,
+      readAt: receipt.readAt.toISOString()
+    });
+  });
+
+  socket.on("sync:offline", async ({ roomId, queued }, ack) => {
+    const member = await authorizeRoom(socket.data.userId, roomId);
+    if (!member?.canPost) {
+      ack({ error: "Forbidden" });
+      return;
+    }
+
+    ack({ accepted: queued.length });
   });
 
   socket.on("disconnecting", async () => {
@@ -201,6 +247,7 @@ io.on("connection", (socket) => {
         })
       )
     );
+    void clearSocketState(socket.data.sessionId);
   });
 });
 

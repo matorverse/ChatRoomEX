@@ -1,18 +1,21 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Hash, Menu, MessageCircle, Search, Shield, Sparkles, Users } from "lucide-react";
+import { Hash, Menu, MessageCircle, Search, Shield, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { VirtualizedChat } from "@/components/chat/virtualized-chat";
 import { MessageComposer } from "@/components/chat/message-composer";
 import { ThreadPanel } from "@/components/chat/thread-panel";
 import { MicroProfileSheet } from "@/components/chat/micro-profile-sheet";
+import { CatchUpButton } from "@/components/chat/catch-up-button";
 import { IconButton } from "@/components/ui/icon-button";
 import { useChatSocket } from "@/lib/realtime/use-chat-socket";
 import type { ChatMessage } from "@/lib/realtime/events";
+import { useSwipeNavigation } from "@/lib/ui/use-swipe-navigation";
 
 type Props = {
   roomId: string;
+  currentUserId: string;
   accessToken: string;
   initialMessages: ChatMessage[];
   unreadCount: number;
@@ -20,12 +23,18 @@ type Props = {
 
 type Pane = "rooms" | "chat" | "members";
 
-export function ChatExperience({ roomId, accessToken, initialMessages, unreadCount }: Props) {
+export function ChatExperience({ roomId, currentUserId, accessToken, initialMessages, unreadCount }: Props) {
   const [pane, setPane] = useState<Pane>("chat");
   const [threadMessage, setThreadMessage] = useState<ChatMessage | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
-  const chat = useChatSocket(roomId, accessToken, initialMessages);
+  const chat = useChatSocket(roomId, currentUserId, accessToken, initialMessages);
   const activeTitle = useMemo(() => (pane === "rooms" ? "Rooms" : pane === "members" ? "Members" : "Sanctuary"), [pane]);
+  const swipeHandlers = useSwipeNavigation((target) => {
+    setPane((current) => {
+      if (target === "left") return current === "members" ? "chat" : "rooms";
+      return current === "rooms" ? "chat" : "members";
+    });
+  });
 
   return (
     <div className="mx-auto grid min-h-dvh w-full max-w-[1440px] grid-cols-1 overflow-hidden lg:grid-cols-[288px_minmax(0,1fr)_320px]">
@@ -33,7 +42,7 @@ export function ChatExperience({ roomId, accessToken, initialMessages, unreadCou
         <RoomDrawer activeRoomId={roomId} />
       </aside>
 
-      <section className="relative flex min-h-dvh flex-col overflow-hidden">
+      <section className="relative flex min-h-dvh flex-col overflow-hidden" {...swipeHandlers}>
         <header className="glass-overlay sticky top-0 z-20 mx-3 mt-3 flex items-center gap-2 rounded-2xl px-3 py-2">
           <IconButton label="Rooms" active={pane === "rooms"} className="lg:hidden" onClick={() => setPane("rooms")}>
             <Menu size={19} />
@@ -42,21 +51,16 @@ export function ChatExperience({ roomId, accessToken, initialMessages, unreadCou
             <p className="truncate text-sm font-semibold">{activeTitle}</p>
             <p className="truncate text-xs text-muted dark:text-muted-dark">
               {chat.connected ? "Live now" : "Reconnecting quietly"}
-              {chat.typingUsers.length > 0 ? ` • ${chat.typingUsers.length} typing` : ""}
+              {chat.typingUsers.length > 0 ? ` - ${chat.typingUsers.length} typing` : ""}
             </p>
           </div>
-          {unreadCount > 50 ? (
-            <button className="inline-flex h-11 items-center gap-2 rounded-full bg-yellow-soft/70 px-3 text-sm font-medium text-ink transition active:scale-95">
-              <Sparkles size={16} />
-              Catch up
-            </button>
-          ) : null}
+          <CatchUpButton messages={chat.messages} unreadCount={unreadCount} />
           <IconButton label="Members" active={pane === "members"} className="lg:hidden" onClick={() => setPane("members")}>
             <Users size={19} />
           </IconButton>
         </header>
 
-        <VirtualizedChat messages={chat.messages} onReply={setThreadMessage} onAuthorPress={setProfileUserId} />
+        <VirtualizedChat currentUserId={currentUserId} messages={chat.messages} onReply={setThreadMessage} onAuthorPress={setProfileUserId} />
         <MessageComposer onSend={chat.sendMessage} onTyping={(isTyping) => chat.setTyping({ isTyping })} />
 
         <nav className="glass-overlay fixed inset-x-3 bottom-3 z-30 mx-auto flex max-w-sm justify-around rounded-2xl p-1 lg:hidden">

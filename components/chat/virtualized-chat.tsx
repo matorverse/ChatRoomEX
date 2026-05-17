@@ -1,17 +1,19 @@
 "use client";
 
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { motion } from "framer-motion";
 import { CornerDownRight, SmilePlus } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ChatMessage } from "@/lib/realtime/events";
 
 type Props = {
   messages: ChatMessage[];
+  currentUserId: string;
   onReply: (message: ChatMessage) => void;
   onAuthorPress: (userId: string) => void;
 };
 
-export function VirtualizedChat({ messages, onReply, onAuthorPress }: Props) {
+export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPress }: Props) {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
@@ -29,7 +31,7 @@ export function VirtualizedChat({ messages, onReply, onAuthorPress }: Props) {
       <div className="relative mx-auto w-full max-w-3xl" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
           const message = messages[virtualRow.index];
-          const isMine = message.authorId === "me";
+          const isMine = message.authorId === currentUserId;
 
           return (
             <article
@@ -37,7 +39,15 @@ export function VirtualizedChat({ messages, onReply, onAuthorPress }: Props) {
               className="absolute left-0 top-0 w-full px-1 py-2"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
             >
-              <div className={`flex gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
+              <motion.div
+                className={`flex gap-2 ${isMine ? "justify-end" : "justify-start"}`}
+                drag="x"
+                dragConstraints={{ left: -72, right: 72 }}
+                dragElastic={0.08}
+                onDragEnd={(_, info) => {
+                  if (Math.abs(info.offset.x) > 48) onReply(message);
+                }}
+              >
                 {!isMine ? (
                   <button
                     className="mt-1 grid size-9 shrink-0 place-items-center rounded-full bg-blue-soft/55 text-sm font-semibold"
@@ -69,7 +79,7 @@ export function VirtualizedChat({ messages, onReply, onAuthorPress }: Props) {
                     </button>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             </article>
           );
         })}

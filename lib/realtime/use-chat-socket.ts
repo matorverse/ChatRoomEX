@@ -14,7 +14,7 @@ import { flushOfflineQueue } from "@/lib/offline/sync";
 
 type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
-export function useChatSocket(roomId: string, accessToken: string, initialMessages: ChatMessage[]) {
+export function useChatSocket(roomId: string, currentUserId: string, accessToken: string, initialMessages: ChatMessage[]) {
   const [messages, setMessages] = useState(() => initialMessages);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -102,7 +102,7 @@ export function useChatSocket(roomId: string, accessToken: string, initialMessag
         const optimistic: ChatMessage = {
           id: crypto.randomUUID(),
           roomId,
-          authorId: "me",
+          authorId: currentUserId,
           body,
           threadId: threadId ?? null,
           parentId: parentId ?? null,
@@ -120,7 +120,7 @@ export function useChatSocket(roomId: string, accessToken: string, initialMessag
       },
       setTyping: (input: Omit<TypingInput, "roomId">) => socketRef.current?.emit("typing:set", { roomId, ...input })
     }),
-    [connected, messages, roomId, typingUsers]
+    [connected, currentUserId, messages, roomId, typingUsers]
   );
 
   return api;

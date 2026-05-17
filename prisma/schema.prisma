@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum RoomType {
@@ -38,18 +39,38 @@ model User {
   id            String         @id @default(uuid()) @db.Uuid
   handle        String         @unique @db.VarChar(32)
   displayName   String         @db.VarChar(80)
+  passwordHash  String?        @db.VarChar(256)
   avatarUrl     String?
   locale        String         @default("en")
   createdAt     DateTime       @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  sessions      AuthSession[]
   memberships   RoomMember[]
   messages      Message[]
   reactions     Reaction[]
   notifications Notification[]
   presence      RoomPresence[]
+  readReceipts  ReadReceipt[]
+  auditLogs     AuditLog[]
 
   @@index([displayName])
   @@map("users")
+}
+
+model AuthSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  refreshHash  String    @unique @db.VarChar(128)
+  userAgent    String?   @db.VarChar(240)
+  ipHash       String?   @db.VarChar(128)
+  expiresAt    DateTime  @db.Timestamptz(6)
+  revokedAt    DateTime? @db.Timestamptz(6)
+  rotatedAt    DateTime? @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
 }
 
 model Room {
@@ -66,6 +87,9 @@ model Room {
   messages      Message[]
   threads       Thread[]
   presence      RoomPresence[]
+  notifications Notification[]
+  readReceipts  ReadReceipt[]
+  auditLogs     AuditLog[]
 
   @@index([type, updatedAt])
   @@map("rooms")
@@ -118,12 +142,29 @@ model Message {
   thread         Thread?       @relation("ThreadReplies", fields: [threadId], references: [id], onDelete: SetNull)
   rootedThread   Thread?       @relation("ThreadRoot")
   reactions      Reaction[]
+  readReceipts   ReadReceipt[]
+  notifications  Notification[]
 
   @@unique([authorId, clientNonce])
   @@index([roomId, createdAt])
   @@index([threadId, createdAt])
   @@index([authorId, createdAt])
   @@map("messages")
+}
+
+model ReadReceipt {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  userId    String   @db.Uuid
+  messageId String   @db.Uuid
+  readAt    DateTime @default(now()) @db.Timestamptz(6)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId, messageId])
+  @@index([roomId, userId, readAt])
+  @@map("read_receipts")
 }
 
 model Reaction {
@@ -149,8 +190,11 @@ model Notification {
   readAt    DateTime? @db.Timestamptz(6)
   createdAt DateTime  @default(now()) @db.Timestamptz(6)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room      Room?     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  message   Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
+  @@index([roomId, createdAt])
   @@map("notifications")
 }
 
@@ -167,4 +211,20 @@ model RoomPresence {
   @@unique([roomId, userId])
   @@index([roomId, status, lastSeenAt])
   @@map("room_presence")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @db.Uuid
+  roomId    String?  @db.Uuid
+  action    String   @db.VarChar(80)
+  metadata  Json?
+  ipHash    String?  @db.VarChar(128)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  room      Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([roomId, createdAt])
+  @@map("audit_logs")
 }

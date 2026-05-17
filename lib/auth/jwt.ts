@@ -21,6 +21,18 @@ export async function verifyAccessToken(token: string): Promise<SessionClaims> {
   return payload as SessionClaims;
 }
 
+export async function verifyRefreshToken(token: string): Promise<SessionClaims> {
+  const { payload } = await jwtVerify(token, refreshSecret, {
+    algorithms: ["HS256"]
+  });
+
+  if (payload.typ !== "refresh" || typeof payload.sub !== "string" || typeof payload.sid !== "string") {
+    throw new Error("Invalid refresh token");
+  }
+
+  return payload as SessionClaims;
+}
+
 export async function issueAccessToken(userId: string, sessionId: string) {
   return new SignJWT({ typ: "access", sid: sessionId })
     .setProtectedHeader({ alg: "HS256" })
