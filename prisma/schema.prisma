@@ -1,0 +1,170 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomType {
+  text
+  announcement
+  lightweight_audio
+}
+
+enum RoomRole {
+  owner
+  admin
+  moderator
+  member
+  guest
+}
+
+enum MessageStatus {
+  sent
+  edited
+  deleted
+}
+
+enum PresenceStatus {
+  online
+  idle
+  dnd
+  offline
+}
+
+model User {
+  id            String         @id @default(uuid()) @db.Uuid
+  handle        String         @unique @db.VarChar(32)
+  displayName   String         @db.VarChar(80)
+  avatarUrl     String?
+  locale        String         @default("en")
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  memberships   RoomMember[]
+  messages      Message[]
+  reactions     Reaction[]
+  notifications Notification[]
+  presence      RoomPresence[]
+
+  @@index([displayName])
+  @@map("users")
+}
+
+model Room {
+  id            String         @id @default(uuid()) @db.Uuid
+  slug          String         @unique @db.VarChar(64)
+  name          String         @db.VarChar(100)
+  type          RoomType       @default(text)
+  description   String?        @db.VarChar(240)
+  isPrivate     Boolean        @default(false)
+  createdById   String         @db.Uuid
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  members       RoomMember[]
+  messages      Message[]
+  threads       Thread[]
+  presence      RoomPresence[]
+
+  @@index([type, updatedAt])
+  @@map("rooms")
+}
+
+model RoomMember {
+  id         String   @id @default(uuid()) @db.Uuid
+  roomId     String   @db.Uuid
+  userId     String   @db.Uuid
+  role       RoomRole @default(member)
+  canPost    Boolean  @default(true)
+  canReact   Boolean  @default(true)
+  canModerate Boolean @default(false)
+  joinedAt   DateTime @default(now()) @db.Timestamptz(6)
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([userId, role])
+  @@map("room_members")
+}
+
+model Thread {
+  id              String    @id @default(uuid()) @db.Uuid
+  roomId          String    @db.Uuid
+  rootMessageId   String    @unique @db.Uuid
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  rootMessage     Message   @relation("ThreadRoot", fields: [rootMessageId], references: [id], onDelete: Cascade)
+  replies         Message[] @relation("ThreadReplies")
+
+  @@index([roomId, updatedAt])
+  @@map("threads")
+}
+
+model Message {
+  id             String        @id @default(uuid()) @db.Uuid
+  roomId         String        @db.Uuid
+  authorId       String        @db.Uuid
+  threadId       String?       @db.Uuid
+  parentId       String?       @db.Uuid
+  body           String        @db.VarChar(4000)
+  status         MessageStatus @default(sent)
+  clientNonce    String?       @db.VarChar(80)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
+  room           Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  author         User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  thread         Thread?       @relation("ThreadReplies", fields: [threadId], references: [id], onDelete: SetNull)
+  rootedThread   Thread?       @relation("ThreadRoot")
+  reactions      Reaction[]
+
+  @@unique([authorId, clientNonce])
+  @@index([roomId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([authorId, createdAt])
+  @@map("messages")
+}
+
+model Reaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  userId    String   @db.Uuid
+  emoji     String   @db.VarChar(32)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([userId, createdAt])
+  @@map("reactions")
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  roomId    String?   @db.Uuid
+  messageId String?   @db.Uuid
+  kind      String    @db.VarChar(40)
+  readAt    DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+model RoomPresence {
+  id           String         @id @default(uuid()) @db.Uuid
+  roomId       String         @db.Uuid
+  userId       String         @db.Uuid
+  status       PresenceStatus @default(online)
+  lastSeenAt   DateTime       @default(now()) @db.Timestamptz(6)
+  activeSocket String?        @db.VarChar(120)
+  room         Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId, status, lastSeenAt])
+  @@map("room_presence")
+}

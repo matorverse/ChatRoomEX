@@ -1,0 +1,44 @@
+{
+  "name": "chatroomex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "realtime:dev": "tsx realtime/src/server.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@google-cloud/vertexai": "^1.10.0",
+    "@prisma/client": "^6.8.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "@tanstack/react-virtual": "^3.13.8",
+    "@upstash/redis": "^1.35.0",
+    "clsx": "^2.1.1",
+    "dexie": "^4.0.11",
+    "framer-motion": "^12.12.1",
+    "jose": "^6.0.11",
+    "lucide-react": "^0.511.0",
+    "next": "^16.0.0",
+    "pino": "^9.6.0",
+    "prisma": "^6.8.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "zod": "^3.25.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.1.5",
+    "tailwindcss": "^4.1.7",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
