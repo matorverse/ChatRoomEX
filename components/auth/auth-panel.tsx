@@ -44,27 +44,63 @@ export function AuthPanel() {
           <p className="mt-1 text-sm leading-6 text-muted dark:text-muted-dark">Sign in to enter your realtime rooms.</p>
         </div>
         <div className="mb-4 grid grid-cols-2 rounded-xl bg-panel p-1 dark:bg-panel-dark">
-          <button className={`rounded-lg text-sm ${mode === "login" ? "bg-surface shadow-sm dark:bg-surface-dark" : ""}`} onClick={() => setMode("login")}>
+          <button
+            type="button"
+            className={`rounded-lg text-sm ${mode === "login" ? "bg-surface shadow-sm dark:bg-surface-dark" : ""}`}
+            onClick={() => {
+              setError(null);
+              setMode("login");
+            }}
+          >
             Login
           </button>
-          <button className={`rounded-lg text-sm ${mode === "register" ? "bg-surface shadow-sm dark:bg-surface-dark" : ""}`} onClick={() => setMode("register")}>
+          <button
+            type="button"
+            className={`rounded-lg text-sm ${mode === "register" ? "bg-surface shadow-sm dark:bg-surface-dark" : ""}`}
+            onClick={() => {
+              setError(null);
+              setMode("register");
+            }}
+          >
             Register
           </button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <label className="block text-sm font-medium">
             Handle
-            <input name="handle" autoComplete="username" className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark" />
+            <input
+              name="handle"
+              autoComplete="username"
+              required
+              minLength={3}
+              maxLength={32}
+              pattern="[a-zA-Z0-9_]+"
+              className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark"
+            />
           </label>
           {mode === "register" ? (
             <label className="block text-sm font-medium">
               Display name
-              <input name="displayName" autoComplete="name" className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark" />
+              <input
+                name="displayName"
+                autoComplete="name"
+                required
+                maxLength={80}
+                className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark"
+              />
             </label>
           ) : null}
           <label className="block text-sm font-medium">
             Password
-            <input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark" />
+            <input
+              name="password"
+              type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              required
+              minLength={mode === "register" ? 12 : 1}
+              maxLength={128}
+              className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark"
+            />
           </label>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <button type="submit" className="h-11 w-full rounded-xl bg-blue-strong font-semibold text-white disabled:opacity-50" disabled={pending}>

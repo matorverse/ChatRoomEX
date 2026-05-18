@@ -16,11 +16,12 @@ const registerSchema = z.object({
 export async function POST(request: Request) {
   const parsed = registerSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid registration details" }, { status: 400 });
+    return NextResponse.json({ error: "Use a 3-32 character handle and a password of at least 12 characters." }, { status: 400 });
   }
 
   const passwordHash = await hashPassword(parsed.data.password);
-  const user = await prisma.$transaction(async (tx) => {
+  try {
+    const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
         handle: parsed.data.handle,
@@ -52,7 +53,10 @@ export async function POST(request: Request) {
     return created;
   });
 
-  await createSession(user.id);
-  await auditLog({ actorId: user.id, action: "auth.registered" });
-  return NextResponse.json({ user }, { status: 201 });
+    await createSession(user.id);
+    await auditLog({ actorId: user.id, action: "auth.registered" });
+    return NextResponse.json({ user }, { status: 201 });
+  } catch {
+    return NextResponse.json({ error: "That handle is already taken or the database is not migrated yet." }, { status: 409 });
+  }
 }
