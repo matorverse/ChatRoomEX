@@ -4,14 +4,12 @@ services:
     env: node
     plan: free
     buildCommand: npm ci --include=dev && npm run prisma:generate && npm run build
-    startCommand: npm run prisma:migrate && npm start
+    startCommand: NODE_ENV=production npm run prisma:migrate && npm start
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
         sync: false
-      - key: NODE_ENV
-        value: production
       - key: NEXT_PUBLIC_REALTIME_URL
         fromService:
           type: web
@@ -23,14 +21,12 @@ services:
     env: node
     plan: free
     buildCommand: npm ci --include=dev && npm run prisma:generate
-    startCommand: npx tsx realtime/src/server.ts
+    startCommand: NODE_ENV=production npx tsx realtime/src/server.ts
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
         sync: false
-      - key: NODE_ENV
-        value: production
       - key: REDIS_URL
         fromService:
           type: redis
