@@ -27,3 +27,34 @@ export async function GET() {
 
   return NextResponse.json({ rooms });
 }
+
+export async function POST(request: Request) {
+  const session = await getCurrentSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { name } = await request.json();
+  if (!name || typeof name !== "string") {
+    return NextResponse.json({ error: "Invalid name" }, { status: 400 });
+  }
+
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + crypto.randomUUID().slice(0, 8);
+
+  const room = await prisma.room.create({
+    data: {
+      name,
+      slug,
+      createdById: session.userId,
+      members: {
+        create: {
+          userId: session.userId,
+          role: "owner",
+          canModerate: true
+        }
+      }
+    }
+  });
+
+  return NextResponse.json({ room });
+}

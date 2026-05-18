@@ -11,11 +11,37 @@ type Props = {
 
 export function MessageComposer({ onSend, onTyping }: Props) {
   const [body, setBody] = useState("");
+  const [uploading, setUploading] = useState(false);
   const typingTimer = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    if (res.ok) {
+      const { url } = await res.json();
+      setBody((prev) => prev + (prev ? "\n\n" : "") + `![Image](${url})`);
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   async function submit() {
-    const value = body.trim();
+    let value = body.trim();
     if (!value) return;
+
+    if (value === "/shrug") {
+      value = "¯\\_(ツ)_/¯";
+    } else if (value.startsWith("/me ")) {
+      value = `_${value.slice(4)}_`;
+    }
+
     setBody("");
     onTyping(false);
     await onSend(value);
@@ -46,8 +72,9 @@ export function MessageComposer({ onSend, onTyping }: Props) {
           className="max-h-32 min-h-7 w-full resize-none bg-transparent text-sm leading-7 outline-none"
         />
       </div>
-      <IconButton label="Add image" className="hidden sm:grid">
-        <ImagePlus size={18} />
+      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
+      <IconButton label="Add image" className="hidden sm:grid" onClick={() => fileInputRef.current?.click()}>
+        <ImagePlus size={18} className={uploading ? "animate-pulse" : ""} />
       </IconButton>
       <IconButton label="Voice note" className="hidden sm:grid">
         <Mic size={18} />

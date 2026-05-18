@@ -5,6 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   use: {
     baseURL: "http://127.0.0.1:3000",
+    channel: "chrome",
     trace: "on-first-retry"
   },
   projects: [

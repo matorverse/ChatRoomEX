@@ -79,7 +79,11 @@ export async function clearSessionCookies() {
 
 async function setSessionCookies(accessToken: string, refreshToken: string) {
   const cookieStore = await cookies();
-  const secure = process.env.NODE_ENV === "production";
+  const requestHeaders = await headers();
+  const host = requestHeaders.get("host") || "";
+  const isLocalhostOrIp = /^localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host);
+  const secure = process.env.NODE_ENV === "production" && !isLocalhostOrIp;
+  
   cookieStore.set(accessCookie, accessToken, {
     httpOnly: true,
     sameSite: "lax",

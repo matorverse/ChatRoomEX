@@ -10,13 +10,13 @@ export const runtime = "nodejs";
 const registerSchema = z.object({
   handle: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,32}$/),
   displayName: z.string().trim().min(1).max(80),
-  password: z.string().min(12).max(128)
+  password: z.string().min(6).max(128)
 });
 
 export async function POST(request: Request) {
   const parsed = registerSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return NextResponse.json({ error: "Use a 3-32 character handle and a password of at least 12 characters." }, { status: 400 });
+    return NextResponse.json({ error: "Use a 3-32 character handle and a password of at least 6 characters." }, { status: 400 });
   }
 
   const passwordHash = await hashPassword(parsed.data.password);

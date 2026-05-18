@@ -1,4 +1,4 @@
-import { VertexAI } from "@google-cloud/vertexai";
+import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { ChatMessage } from "@/lib/realtime/events";
 
@@ -10,9 +10,10 @@ export const catchUpSummarySchema = z.object({
 
 export type CatchUpSummary = z.infer<typeof catchUpSummarySchema>;
 
-const vertex =
+const genAI =
   process.env.GOOGLE_CLOUD_PROJECT && process.env.VERTEX_LOCATION
-    ? new VertexAI({
+    ? new GoogleGenAI({
+        enterprise: true,
         project: process.env.GOOGLE_CLOUD_PROJECT,
         location: process.env.VERTEX_LOCATION
       })
@@ -27,61 +28,46 @@ export async function summarizeUnread(messages: ChatMessage[]): Promise<CatchUpS
     };
   }
 
-  if (!vertex) {
+  if (!genAI) {
     return fallbackSummary(messages);
   }
 
-  const model = vertex.getGenerativeModel({
+  const result = await genAI.models.generateContent({
     model: "gemini-2.5-flash",
-    generationConfig: {
+    contents: JSON.stringify({
+      task: "Summarize unread chat messages for a mobile catch-up panel.",
+      messages: messages.map((message) => ({
+        authorId: message.authorId,
+        body: message.body,
+        createdAt: message.createdAt
+      }))
+    }),
+    config: {
       temperature: 0.2,
-      responseMimeType: "application/json"
-    },
-    systemInstruction:
-      "Return strict JSON only with keys bullets, actionItems, sentiment. bullets must contain exactly three concise strings. sentiment must be one of calm, positive, concerned, urgent, mixed."
+      responseMimeType: "application/json",
+      systemInstruction:
+        "Return strict JSON only with keys bullets, actionItems, sentiment. bullets must contain exactly three concise strings. sentiment must be one of calm, positive, concerned, urgent, mixed."
+    }
   });
 
-  const result = await model.generateContent({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: JSON.stringify({
-              task: "Summarize unread chat messages for a mobile catch-up panel.",
-              messages: messages.map((message) => ({
-                authorId: message.authorId,
-                body: message.body,
-                createdAt: message.createdAt
-              }))
-            })
-          }
-        ]
-      }
-    ]
-  });
-
-  const text = result.response.candidates?.[0]?.content.parts?.[0]?.text;
+  const text = result.text;
   return catchUpSummarySchema.parse(JSON.parse(text ?? "{}"));
 }
 
 export async function streamCatchUp(messages: ChatMessage[], onChunk: (chunk: string) => void) {
-  if (!vertex) {
+  if (!genAI) {
     onChunk(JSON.stringify(fallbackSummary(messages)));
     return;
   }
 
-  const model = vertex.getGenerativeModel({
+  const stream = await genAI.models.generateContentStream({
     model: "gemini-2.5-flash",
-    generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+    contents: JSON.stringify({ messages }),
+    config: { temperature: 0.2, responseMimeType: "application/json" }
   });
 
-  const stream = await model.generateContentStream({
-    contents: [{ role: "user", parts: [{ text: JSON.stringify({ messages }) }] }]
-  });
-
-  for await (const item of stream.stream) {
-    const chunk = item.candidates?.[0]?.content.parts?.[0]?.text;
+  for await (const item of stream) {
+    const chunk = item.text;
     if (chunk) onChunk(chunk);
   }
 }

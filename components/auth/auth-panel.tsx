@@ -97,7 +97,7 @@ export function AuthPanel() {
               type="password"
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               required
-              minLength={mode === "register" ? 12 : 1}
+              minLength={mode === "register" ? 6 : 1}
               maxLength={128}
               className="mt-1 h-11 w-full rounded-xl border border-border-soft bg-transparent px-3 outline-none focus:border-blue-strong dark:border-border-soft-dark"
             />

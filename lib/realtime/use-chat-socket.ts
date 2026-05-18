@@ -7,7 +7,8 @@ import type {
   ClientToServerEvents,
   SendMessageInput,
   ServerToClientEvents,
-  TypingInput
+  TypingInput,
+  PresenceState
 } from "@/lib/realtime/events";
 import { enqueueMessage, markAcked, markFailed, offlineDb } from "@/lib/offline/db";
 import { flushOfflineQueue } from "@/lib/offline/sync";
@@ -18,6 +19,9 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
   const [messages, setMessages] = useState(() => initialMessages);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [presence, setPresence] = useState<PresenceState[]>([]);
+  const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
+  const [readReceipts, setReadReceipts] = useState<Record<string, string[]>>({});
   const socketRef = useRef<ChatSocket | null>(null);
 
   useEffect(() => {
@@ -26,10 +30,12 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
     offlineDb.messages
       .where("roomId")
       .equals(roomId)
+      .reverse()
+      .limit(200)
       .sortBy("createdAt")
       .then((cached) => {
-        if (mounted && cached.length > initialMessages.length) {
-          setMessages(cached);
+        if (mounted && cached.length > 0) {
+          setMessages(cached.reverse());
         }
       });
 
@@ -86,6 +92,35 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       });
     });
 
+    socket.on("presence:update", ({ presence }) => {
+      setPresence(presence);
+    });
+
+    socket.on("reaction:update", ({ messageId, emoji, userId, op }) => {
+      setReactions((current) => {
+        const next = { ...current };
+        if (!next[messageId]) next[messageId] = {};
+        if (!next[messageId][emoji]) next[messageId][emoji] = [];
+        if (op === "add" && !next[messageId][emoji].includes(userId)) {
+          next[messageId][emoji] = [...next[messageId][emoji], userId];
+        } else if (op === "remove") {
+          next[messageId][emoji] = next[messageId][emoji].filter(id => id !== userId);
+        }
+        return next;
+      });
+    });
+
+    socket.on("read:receipt", ({ messageId, userId }) => {
+      setReadReceipts((current) => {
+        const next = { ...current };
+        if (!next[messageId]) next[messageId] = [];
+        if (!next[messageId].includes(userId)) {
+          next[messageId] = [...next[messageId], userId];
+        }
+        return next;
+      });
+    });
+
     return () => {
       socket.close();
       socketRef.current = null;
@@ -97,6 +132,9 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       connected,
       messages,
       typingUsers,
+      presence,
+      reactions,
+      readReceipts,
       sendMessage: async (body: string, threadId?: string, parentId?: string) => {
         const clientNonce = crypto.randomUUID();
         const optimistic: ChatMessage = {
@@ -118,9 +156,11 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
 
         socketRef.current?.emit("message:send", input, () => undefined);
       },
-      setTyping: (input: Omit<TypingInput, "roomId">) => socketRef.current?.emit("typing:set", { roomId, ...input })
+      setTyping: (input: Omit<TypingInput, "roomId">) => socketRef.current?.emit("typing:set", { roomId, ...input }),
+      toggleReaction: (messageId: string, emoji: string) => socketRef.current?.emit("reaction:toggle", { roomId, messageId, emoji }),
+      markReadBatch: (messageIds: string[]) => socketRef.current?.emit("read:mark:batch", { roomId, messageIds })
     }),
-    [connected, currentUserId, messages, roomId, typingUsers]
+    [connected, currentUserId, messages, roomId, typingUsers, presence, reactions, readReceipts]
   );
 
   return api;

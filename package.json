@@ -17,7 +17,7 @@
     "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@google-cloud/vertexai": "^1.10.0",
+    "@google/genai": "^2.4.0",
     "@prisma/client": "^6.8.0",
     "@sentry/node": "^9.47.1",
     "@socket.io/redis-adapter": "^8.3.0",
@@ -39,14 +39,17 @@
     "zod": "^3.25.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@tailwindcss/postcss": "^4.1.7",
     "@types/node": "^22.15.18",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
-    "@tailwindcss/postcss": "^4.1.7",
-    "@playwright/test": "^1.52.0",
     "tailwindcss": "^4.1.7",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vitest": "^3.1.4"
+  },
+  "overrides": {
+    "postcss": "^8.5.14"
   }
 }

@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: chatroomex-web
+    env: node
+    buildCommand: npm ci && npm run prisma:generate && npm run build
+    startCommand: npm run prisma:migrate && npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_REALTIME_URL
+        fromService:
+          type: web
+          name: chatroomex-realtime
+          envVarKey: RENDER_EXTERNAL_URL
+    disk:
+      name: chatroomex-uploads
+      mountPath: /opt/render/project/src/public/uploads
+      sizeGB: 1
+
+  - type: web
+    name: chatroomex-realtime
+    env: node
+    buildCommand: npm ci && npm run prisma:generate
+    startCommand: npx tsx realtime/src/server.ts
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: chatroomex-redis
+          property: connectionString
+
+  - type: redis
+    name: chatroomex-redis
+    ipAllowList: []
+    plan: free

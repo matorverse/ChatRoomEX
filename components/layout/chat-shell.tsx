@@ -29,19 +29,34 @@ const seedMessages: ChatMessage[] = [
   }
 ];
 
-export async function ChatShell() {
+export async function ChatShell({ roomId: targetRoomId }: { roomId?: string }) {
   const session = await getCurrentSession();
   if (!session) {
     return <AuthPanel />;
   }
 
-  const firstRoom = await prisma.room.findFirst({
-    where: { members: { some: { userId: session.userId } } },
-    select: { id: true }
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId }
   });
 
-  const activeRoomId = firstRoom?.id ?? roomId;
-  const messages = firstRoom
+  if (!user) {
+    return <AuthPanel />;
+  }
+
+  const userRooms = await prisma.room.findMany({
+    where: { members: { some: { userId: session.userId } } },
+    select: { id: true, name: true },
+    orderBy: { updatedAt: "desc" }
+  });
+
+  const activeRoomId = targetRoomId && userRooms.some((r) => r.id === targetRoomId) ? targetRoomId : userRooms[0]?.id ?? roomId;
+
+  const roomMembers = await prisma.roomMember.findMany({
+    where: { roomId: activeRoomId },
+    select: { user: { select: { id: true, displayName: true, avatarUrl: true } } }
+  });
+
+  const messages = userRooms.length > 0
     ? await prisma.message.findMany({
         where: { roomId: activeRoomId, status: { not: "deleted" } },
         select: {
@@ -71,5 +86,15 @@ export async function ChatShell() {
         }))
     : seedMessages;
 
-  return <ChatExperience accessToken={session.accessToken} currentUserId={session.userId} initialMessages={initialMessages} roomId={activeRoomId} unreadCount={67} />;
+  return (
+    <ChatExperience
+      accessToken={session.accessToken}
+      currentUserId={session.userId}
+      initialMessages={initialMessages}
+      roomId={activeRoomId}
+      unreadCount={67}
+      rooms={userRooms}
+      initialMembers={roomMembers.map((m) => m.user)}
+    />
+  );
 }

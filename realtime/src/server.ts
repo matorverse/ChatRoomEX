@@ -25,7 +25,7 @@ const httpServer = createServer();
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
   cors: {
-    origin: process.env.WEB_ORIGIN?.split(",") ?? ["http://localhost:3000"],
+    origin: "*",
     credentials: true
   },
   transports: ["websocket", "polling"],
@@ -36,10 +36,15 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
 });
 
 if (process.env.REDIS_URL) {
-  const pubClient = createClient({ url: process.env.REDIS_URL });
-  const subClient = pubClient.duplicate();
-  await Promise.all([pubClient.connect(), subClient.connect()]);
-  io.adapter(createAdapter(pubClient, subClient));
+  try {
+    const pubClient = createClient({ url: process.env.REDIS_URL });
+    const subClient = pubClient.duplicate();
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    io.adapter(createAdapter(pubClient, subClient));
+    log.info("Redis adapter configured successfully");
+  } catch (err) {
+    log.error({ err }, "Failed to connect to Redis. Falling back to memory adapter.");
+  }
 }
 
 io.use(async (socket, next) => {
@@ -143,18 +148,6 @@ io.on("connection", (socket) => {
       }
     });
 
-    const members = await prisma.roomMember.findMany({
-      where: { roomId: input.roomId },
-      select: { userId: true }
-    });
-    await incrementUnreadForRoom(input.roomId, socket.data.userId, members.map((member) => member.userId));
-    void auditLog({
-      actorId: socket.data.userId,
-      roomId: input.roomId,
-      action: "message.created",
-      metadata: { messageId: message.id, threadId: message.threadId }
-    });
-
     const payload = {
       id: message.id,
       roomId: message.roomId,
@@ -170,6 +163,18 @@ io.on("connection", (socket) => {
     socket.emit("message:ack", { clientNonce: input.clientNonce, message: payload });
     socket.to(`room:${input.roomId}`).emit("message:new", { message: payload });
     ack({ accepted: true });
+
+    setImmediate(async () => {
+      try {
+        const members = await prisma.roomMember.findMany({
+          where: { roomId: input.roomId },
+          select: { userId: true }
+        });
+        await incrementUnreadForRoom(input.roomId, socket.data.userId, members.map((member) => member.userId));
+      } catch (err) {
+        log.error({ err }, "Failed to increment unread counts");
+      }
+    });
   });
 
   socket.on("typing:set", async (raw) => {
@@ -197,34 +202,46 @@ io.on("connection", (socket) => {
     });
 
     if (existing) {
-      await prisma.reaction.delete({ where: { id: existing.id } });
-      io.to(`room:${parsed.data.roomId}`).emit("reaction:update", { ...parsed.data, userId: socket.data.userId, op: "remove" });
-      void auditLog({ actorId: socket.data.userId, roomId: parsed.data.roomId, action: "reaction.removed", metadata: parsed.data });
+      try {
+        await prisma.reaction.delete({ where: { id: existing.id } });
+        io.to(`room:${parsed.data.roomId}`).emit("reaction:update", { ...parsed.data, userId: socket.data.userId, op: "remove" });
+        void auditLog({ actorId: socket.data.userId, roomId: parsed.data.roomId, action: "reaction.removed", metadata: parsed.data });
+      } catch (err: any) {
+        if (err.code !== 'P2025') console.error(err);
+      }
     } else {
-      await prisma.reaction.create({
-        data: { messageId: parsed.data.messageId, userId: socket.data.userId, emoji: parsed.data.emoji }
-      });
-      io.to(`room:${parsed.data.roomId}`).emit("reaction:update", { ...parsed.data, userId: socket.data.userId, op: "add" });
-      void auditLog({ actorId: socket.data.userId, roomId: parsed.data.roomId, action: "reaction.added", metadata: parsed.data });
+      try {
+        await prisma.reaction.create({
+          data: { messageId: parsed.data.messageId, userId: socket.data.userId, emoji: parsed.data.emoji }
+        });
+        io.to(`room:${parsed.data.roomId}`).emit("reaction:update", { ...parsed.data, userId: socket.data.userId, op: "add" });
+        void auditLog({ actorId: socket.data.userId, roomId: parsed.data.roomId, action: "reaction.added", metadata: parsed.data });
+      } catch (err: any) {
+        if (err.code !== 'P2002') console.error(err);
+      }
     }
   });
 
-  socket.on("read:mark", async ({ roomId, messageId }) => {
+  socket.on("read:mark:batch", async ({ roomId, messageIds }) => {
     const member = await authorizeRoom(socket.data.userId, roomId);
-    if (!member) return;
+    if (!member || messageIds.length === 0) return;
 
-    const receipt = await prisma.readReceipt.upsert({
-      where: { roomId_userId_messageId: { roomId, userId: socket.data.userId, messageId } },
-      create: { roomId, userId: socket.data.userId, messageId },
-      update: { readAt: new Date() }
+    const readAt = new Date();
+    await prisma.readReceipt.createMany({
+      data: messageIds.map(id => ({ roomId, userId: socket.data.userId, messageId: id, readAt })),
+      skipDuplicates: true
     });
+    
     await clearUnread(socket.data.userId, roomId);
-    io.to(`room:${roomId}`).emit("read:receipt", {
-      roomId,
-      userId: socket.data.userId,
-      messageId,
-      readAt: receipt.readAt.toISOString()
-    });
+    
+    for (const messageId of messageIds) {
+      io.to(`room:${roomId}`).emit("read:receipt", {
+        roomId,
+        userId: socket.data.userId,
+        messageId,
+        readAt: readAt.toISOString()
+      });
+    }
   });
 
   socket.on("sync:offline", async ({ roomId, queued }, ack) => {

@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: oklch(97.6% 0.018 82);
-  --color-canvas-dark: oklch(18.5% 0.018 248);
-  --color-surface: oklch(99% 0.01 90);
-  --color-surface-dark: oklch(23% 0.02 248);
-  --color-panel: oklch(95.5% 0.025 92);
-  --color-panel-dark: oklch(28% 0.025 248);
-  --color-ink: oklch(24% 0.035 248);
-  --color-ink-dark: oklch(94% 0.012 90);
+  --color-canvas: oklch(98% 0.01 240);
+  --color-canvas-dark: oklch(14% 0.02 260);
+  --color-surface: oklch(99.5% 0.01 240);
+  --color-surface-dark: oklch(18% 0.02 260);
+  --color-panel: oklch(96% 0.02 240);
+  --color-panel-dark: oklch(22% 0.03 260);
+  --color-ink: oklch(20% 0.04 260);
+  --color-ink-dark: oklch(95% 0.01 260);
   --color-muted: oklch(54% 0.035 248);
   --color-muted-dark: oklch(76% 0.018 248);
   --color-blue-soft: oklch(84% 0.065 226);
@@ -62,9 +62,16 @@ body {
 @media (prefers-color-scheme: dark) {
   body {
     background:
-      radial-gradient(circle at 10% 0%, oklch(32% 0.045 226 / 34%), transparent 25rem),
-      radial-gradient(circle at 90% 0%, oklch(31% 0.04 151 / 22%), transparent 24rem),
+      radial-gradient(circle at 10% 0%, oklch(35% 0.06 290 / 25%), transparent 30rem),
+      radial-gradient(circle at 90% 0%, oklch(35% 0.05 220 / 20%), transparent 30rem),
+      radial-gradient(circle at 50% 100%, oklch(28% 0.04 300 / 15%), transparent 30rem),
       var(--color-canvas-dark);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: url('/bg-glass.png') center / cover no-repeat fixed, var(--color-canvas-dark);
   }
 }
 
@@ -89,10 +96,11 @@ button {
   box-shadow: var(--shadow-soft);
 }
 
-@supports (backdrop-filter: blur(6px)) {
+@supports (backdrop-filter: blur(8px)) {
   .glass-overlay {
-    background: oklch(99% 0.01 90 / 64%);
-    backdrop-filter: blur(6px) saturate(1.08);
+    background: oklch(99.5% 0.01 240 / 72%);
+    backdrop-filter: blur(12px) saturate(1.2);
+    box-shadow: inset 0 1px 1px oklch(100% 0 0 / 25%), inset 0 -1px 1px oklch(0% 0 0 / 5%), var(--shadow-soft);
   }
 }
 
@@ -102,9 +110,11 @@ button {
     border-color: var(--color-border-soft-dark);
   }
 
-  @supports (backdrop-filter: blur(6px)) {
+  @supports (backdrop-filter: blur(8px)) {
     .glass-overlay {
-      background: oklch(24% 0.02 248 / 68%);
+      background: oklch(18% 0.02 260 / 68%);
+      backdrop-filter: blur(16px) saturate(1.3);
+      box-shadow: inset 0 1px 1px oklch(100% 0 0 / 10%), inset 0 -1px 1px oklch(0% 0 0 / 25%), var(--shadow-soft);
     }
   }
 }
