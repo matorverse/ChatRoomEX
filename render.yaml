@@ -2,6 +2,7 @@ services:
   - type: web
     name: chatroomex-web
     env: node
+    plan: free
     buildCommand: npm ci && npm run prisma:generate && npm run build
     startCommand: npm run prisma:migrate && npm start
     envVars:
@@ -16,14 +17,11 @@ services:
           type: web
           name: chatroomex-realtime
           envVarKey: RENDER_EXTERNAL_URL
-    disk:
-      name: chatroomex-uploads
-      mountPath: /opt/render/project/src/public/uploads
-      sizeGB: 1
 
   - type: web
     name: chatroomex-realtime
     env: node
+    plan: free
     buildCommand: npm ci && npm run prisma:generate
     startCommand: npx tsx realtime/src/server.ts
     envVars:
@@ -42,3 +40,4 @@ services:
   - type: redis
     name: chatroomex-redis
     ipAllowList: []
+    plan: free
