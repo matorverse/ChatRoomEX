@@ -21,13 +21,14 @@ type Props = {
   accessToken: string;
   initialMessages: ChatMessage[];
   unreadCount: number;
+  unreadCounts: Record<string, number>;
   rooms: { id: string; name: string }[];
   initialMembers: { id: string; displayName: string; avatarUrl: string | null }[];
 };
 
 type Pane = "rooms" | "chat" | "members";
 
-export function ChatExperience({ roomId, currentUserId, accessToken, initialMessages, unreadCount, rooms, initialMembers }: Props) {
+export function ChatExperience({ roomId, currentUserId, accessToken, initialMessages, unreadCount, unreadCounts = {}, rooms, initialMembers }: Props) {
   const [pane, setPane] = useState<Pane>("chat");
   const [threadMessage, setThreadMessage] = useState<ChatMessage | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
@@ -49,7 +50,7 @@ export function ChatExperience({ roomId, currentUserId, accessToken, initialMess
   return (
     <div className="mx-auto grid min-h-dvh w-full max-w-[1440px] grid-cols-1 overflow-hidden lg:grid-cols-[288px_minmax(0,1fr)_320px]">
       <aside className="hidden border-r border-border-soft bg-surface/72 p-4 lg:block dark:border-border-soft-dark dark:bg-surface-dark/72">
-        <RoomDrawer activeRoomId={roomId} rooms={rooms} />
+        <RoomDrawer activeRoomId={roomId} rooms={rooms} unreadCounts={unreadCounts} />
       </aside>
 
       <section className="relative flex min-h-dvh flex-col overflow-hidden" {...swipeHandlers}>
@@ -121,7 +122,7 @@ export function ChatExperience({ roomId, currentUserId, accessToken, initialMess
                 transition={{ type: "spring", stiffness: 380, damping: 34 }}
                 onClick={(event) => event.stopPropagation()}
               >
-                {pane === "rooms" ? <RoomDrawer activeRoomId={roomId} rooms={rooms} /> : <MemberDrawer onProfile={setProfileUserId} members={initialMembers} presence={chat.presence} />}
+                {pane === "rooms" ? <RoomDrawer activeRoomId={roomId} rooms={rooms} unreadCounts={unreadCounts} /> : <MemberDrawer onProfile={setProfileUserId} members={initialMembers} presence={chat.presence} />}
               </motion.div>
             </motion.div>
           ) : null}
@@ -138,7 +139,7 @@ export function ChatExperience({ roomId, currentUserId, accessToken, initialMess
   );
 }
 
-function RoomDrawer({ activeRoomId, rooms }: { activeRoomId: string; rooms: { id: string; name: string }[] }) {
+function RoomDrawer({ activeRoomId, rooms, unreadCounts }: { activeRoomId: string; rooms: { id: string; name: string }[]; unreadCounts: Record<string, number> }) {
   const router = useRouter();
   
   return (
@@ -157,21 +158,28 @@ function RoomDrawer({ activeRoomId, rooms }: { activeRoomId: string; rooms: { id
           </span>
           New Room
         </Link>
-        {rooms.map((room, index) => (
-          <Link
-            key={room.id}
-            href={`/chat/${room.id}` as any}
-            prefetch={true}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition hover:bg-panel dark:hover:bg-panel-dark"
-            aria-current={room.id === activeRoomId ? "page" : undefined}
-          >
-            <span className="grid size-9 place-items-center rounded-full bg-blue-soft/45 text-blue-strong">
-              <Hash size={17} />
-            </span>
-            <span className="min-w-0 flex-1 truncate font-medium">{room.name}</span>
-            {index === 0 ? <span className="rounded-full bg-green-soft px-2 py-0.5 text-xs">67</span> : null}
-          </Link>
-        ))}
+        {rooms.map((room) => {
+          const count = unreadCounts[room.id] ?? 0;
+          return (
+            <Link
+              key={room.id}
+              href={`/chat/${room.id}` as any}
+              prefetch={true}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition hover:bg-panel dark:hover:bg-panel-dark"
+              aria-current={room.id === activeRoomId ? "page" : undefined}
+            >
+              <span className="grid size-9 place-items-center rounded-full bg-blue-soft/45 text-blue-strong">
+                <Hash size={17} />
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium">{room.name}</span>
+              {count > 0 ? (
+                <span className="rounded-full bg-green-soft px-2 py-0.5 text-xs font-semibold text-green-strong">
+                  {count}
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

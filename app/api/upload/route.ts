@@ -32,6 +32,20 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    let valid = false;
+    if (file.type === "image/png") {
+      valid = buffer.length >= 8 && buffer.readUInt32BE(0) === 0x89504E47 && buffer.readUInt32BE(4) === 0x0D0A1A0A;
+    } else if (file.type === "image/jpeg") {
+      valid = buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF;
+    } else if (file.type === "image/webp") {
+      valid = buffer.length >= 12 && buffer.toString("binary", 0, 4) === "RIFF" && buffer.toString("binary", 8, 12) === "WEBP";
+    }
+
+    if (!valid) {
+      return NextResponse.json({ error: "Invalid file content. Spoofed image files are not allowed." }, { status: 400 });
+    }
+
     const ext = EXTENSION_MAP[file.type];
     const filename = `${randomUUID()}.${ext}`;
     const uploadDir = join(process.cwd(), "public", "uploads");

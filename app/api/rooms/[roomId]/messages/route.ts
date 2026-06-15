@@ -16,10 +16,22 @@ export async function GET(request: Request, context: { params: Promise<{ roomId:
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { roomId } = await context.params;
-  await requireRoomMember(session.userId, roomId);
-
   const url = new URL(request.url);
-  const parsed = querySchema.parse(Object.fromEntries(url.searchParams));
+  const parsedResult = querySchema.safeParse(Object.fromEntries(url.searchParams));
+  if (!parsedResult.success) {
+    return NextResponse.json({ error: "Invalid query parameters" }, { status: 400 });
+  }
+  const parsed = parsedResult.data;
+
+  const member = await prisma.roomMember.findUnique({
+    where: { roomId_userId: { roomId, userId: session.userId } },
+    select: { role: true }
+  });
+
+  if (!member) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const messages = await prisma.message.findMany({
     where: {
       roomId,

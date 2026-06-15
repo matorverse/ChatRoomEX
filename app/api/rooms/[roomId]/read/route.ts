@@ -14,7 +14,18 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
   const { roomId } = await context.params;
   await requireRoomMember(session.userId, roomId);
-  const body = bodySchema.parse(await request.json());
+  let json: any;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const parsed = bodySchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid messageId" }, { status: 400 });
+  }
+  const body = parsed.data;
 
   const receipt = await prisma.readReceipt.upsert({
     where: { roomId_userId_messageId: { roomId, userId: session.userId, messageId: body.messageId } },

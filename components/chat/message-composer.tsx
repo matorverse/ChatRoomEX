@@ -14,22 +14,80 @@ export function MessageComposer({ onSend, onTyping }: Props) {
   const [uploading, setUploading] = useState(false);
   const typingTimer = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isTypingRef = useRef(false);
+
+  async function compressImage(file: File): Promise<Blob | File> {
+    if (!file.type.startsWith("image/") || file.size < 150 * 1024) {
+      return file;
+    }
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(img.src);
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              resolve(new File([blob], file.name, { type: "image/jpeg", lastModified: Date.now() }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/jpeg",
+          0.75
+        );
+      };
+      img.onerror = () => {
+        resolve(file);
+      };
+    });
+  }
 
   async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     
     setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    if (res.ok) {
-      const { url } = await res.json();
-      setBody((prev) => prev + (prev ? "\n\n" : "") + `![Image](${url})`);
+    try {
+      const processed = await compressImage(file);
+      const formData = new FormData();
+      formData.append("file", processed);
+      
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (res.ok) {
+        const { url } = await res.json();
+        setBody((prev) => prev + (prev ? "\n\n" : "") + `![Image](${url})`);
+      }
+    } catch (error) {
+      console.error("Compression/Upload failed", error);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
-    setUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function submit() {
@@ -43,7 +101,12 @@ export function MessageComposer({ onSend, onTyping }: Props) {
     }
 
     setBody("");
+    isTypingRef.current = false;
     onTyping(false);
+    if (typingTimer.current) {
+      window.clearTimeout(typingTimer.current);
+      typingTimer.current = null;
+    }
     await onSend(value);
   }
 
@@ -63,9 +126,15 @@ export function MessageComposer({ onSend, onTyping }: Props) {
           value={body}
           onChange={(event) => {
             setBody(event.target.value);
-            onTyping(true);
+            if (!isTypingRef.current) {
+              isTypingRef.current = true;
+              onTyping(true);
+            }
             if (typingTimer.current) window.clearTimeout(typingTimer.current);
-            typingTimer.current = window.setTimeout(() => onTyping(false), 1400);
+            typingTimer.current = window.setTimeout(() => {
+              isTypingRef.current = false;
+              onTyping(false);
+            }, 1400);
           }}
           rows={1}
           placeholder="Message Sanctuary"

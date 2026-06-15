@@ -64,7 +64,7 @@ export type ClientToServerEvents = {
   "typing:set": (payload: TypingInput) => void;
   "reaction:toggle": (payload: ReactionInput) => void;
   "read:mark:batch": (payload: { roomId: string; messageIds: string[] }) => void;
-  "sync:offline": (payload: { roomId: string; queued: SendMessageInput[] }, ack: Ack<{ accepted: number }>) => void;
+  "sync:offline": (payload: { roomId: string; queued: SendMessageInput[] }, ack: Ack<{ accepted: number; failedNonce?: string; rollbackReason?: string }>) => void;
 };
 
 export type InterServerEvents = {

@@ -60,12 +60,50 @@ export async function rotateSession(refreshToken: string) {
 
 export async function getCurrentSession(): Promise<CurrentSession | null> {
   const cookieStore = await cookies();
-  const accessToken = cookieStore.get(accessCookie)?.value;
-  if (!accessToken) return null;
+  const headerStore = await headers();
+  
+  let accessToken = cookieStore.get(accessCookie)?.value;
+  if (!accessToken) {
+    const authHeader = headerStore.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      accessToken = authHeader.substring(7);
+    }
+  }
+
+  if (accessToken) {
+    try {
+      const claims = await verifyAccessToken(accessToken);
+      return { userId: claims.sub, sessionId: claims.sid, accessToken };
+    } catch {
+      // Access token expired, attempt recovery with refresh token
+    }
+  }
+
+  const refreshToken = cookieStore.get(refreshCookie)?.value;
+  if (!refreshToken) return null;
 
   try {
-    const claims = await verifyAccessToken(accessToken);
-    return { userId: claims.sub, sessionId: claims.sid, accessToken };
+    const claims = await verifyRefreshToken(refreshToken);
+    const existing = await prisma.authSession.findUnique({ where: { id: claims.sid } });
+    if (!existing || existing.revokedAt || existing.expiresAt < new Date() || existing.refreshHash !== hashToken(refreshToken)) {
+      return null;
+    }
+
+    const nextAccess = await issueAccessToken(claims.sub, claims.sid);
+    const nextRefresh = await issueRefreshToken(claims.sub, claims.sid);
+
+    await prisma.authSession.update({
+      where: { id: claims.sid },
+      data: { refreshHash: hashToken(nextRefresh), rotatedAt: new Date() }
+    });
+
+    try {
+      await setSessionCookies(nextAccess, nextRefresh);
+    } catch {
+      // Ignore Next.js read-only cookies error in RSC rendering phase
+    }
+
+    return { userId: claims.sub, sessionId: claims.sid, accessToken: nextAccess };
   } catch {
     return null;
   }

@@ -1,23 +1,24 @@
-import { Redis } from "@upstash/redis";
-
-const redis =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-    ? new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN
-      })
-    : null;
+import { getClient } from "@/lib/realtime/redis-state";
 
 export async function fixedWindowRateLimit(key: string, limit: number, windowSeconds: number) {
-  if (!redis) {
+  const connection = await getClient();
+  if (!connection) {
     return { allowed: true, remaining: limit - 1 };
   }
 
   const bucket = `rl:${key}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
-  const count = await redis.incr(bucket);
+  let count = 0;
 
-  if (count === 1) {
-    await redis.expire(bucket, windowSeconds);
+  if (connection.type === "tcp") {
+    count = await connection.client.incr(bucket);
+    if (count === 1) {
+      await connection.client.expire(bucket, windowSeconds);
+    }
+  } else {
+    count = await connection.client.incr(bucket);
+    if (count === 1) {
+      await connection.client.expire(bucket, windowSeconds);
+    }
   }
 
   return {

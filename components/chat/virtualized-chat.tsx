@@ -3,7 +3,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion } from "framer-motion";
 import { CornerDownRight, SmilePlus } from "lucide-react";
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/realtime/events";
 
 type Props = {
@@ -57,8 +57,8 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
               virtualRow={virtualRow}
               currentUserId={currentUserId}
               members={members}
-              reactions={reactions[message.id] ?? {}}
-              readReceipts={readReceipts[message.id] ?? []}
+              reactions={reactions[message.id] ?? EMPTY_REACTIONS}
+              readReceipts={readReceipts[message.id] ?? EMPTY_RECEIPTS}
               onReply={onReply}
               onAuthorPress={onAuthorPress}
               onToggleReaction={onToggleReaction}
@@ -71,12 +71,47 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
   );
 }
 
+const EMPTY_REACTIONS: Record<string, string[]> = {};
+const EMPTY_RECEIPTS: string[] = [];
+
+function checkReactionsEqual(prev: Record<string, string[]>, next: Record<string, string[]>) {
+  if (prev === next) return true;
+  const prevKeys = Object.keys(prev);
+  const nextKeys = Object.keys(next);
+  if (prevKeys.length !== nextKeys.length) return false;
+  for (const emoji of prevKeys) {
+    const prevUsers = prev[emoji] || EMPTY_RECEIPTS;
+    const nextUsers = next[emoji] || EMPTY_RECEIPTS;
+    if (prevUsers !== nextUsers) {
+      if (prevUsers.length !== nextUsers.length) return false;
+      for (let i = 0; i < prevUsers.length; i++) {
+        if (prevUsers[i] !== nextUsers[i]) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function checkReceiptsEqual(prev: string[], next: string[]) {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i++) {
+    if (prev[i] !== next[i]) return false;
+  }
+  return true;
+}
+
 const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId, members, reactions, readReceipts, onReply, onAuthorPress, onToggleReaction, onMarkRead }: any) {
   const isMine = message.authorId === currentUserId;
   const author = members.find((m: any) => m.id === message.authorId);
   const displayName = author?.displayName ?? message.authorId;
   const isReadByMe = readReceipts.includes(currentUserId);
   const hasBeenRead = readReceipts.some((id: string) => id !== currentUserId);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isMine && !isReadByMe) {
@@ -106,15 +141,21 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
         <div className={`group max-w-[82%] flex flex-col ${isMine ? "items-end" : "items-start"}`}>
           {!isMine ? <span className="mb-1 ml-1 block text-xs font-medium text-muted-strong dark:text-muted">{displayName}</span> : null}
           <div
-            className={`rounded-2xl border px-4 py-3 shadow-sm relative ${
-              isMine ? "border-blue-soft bg-blue-soft/55 rounded-br-sm" : "border-border-soft bg-surface dark:border-border-soft-dark dark:bg-surface-dark rounded-bl-sm"
+            className={`rounded-2xl border px-4 py-3 shadow-sm relative transition-opacity duration-200 ${
+              message.localState === "pending" ? "opacity-70" : ""
+            } ${
+              message.localState === "failed" ? "border-danger/40 bg-danger-soft/10 dark:border-danger/30 text-danger-strong" : ""
+            } ${
+              isMine && message.localState !== "failed" ? "border-blue-soft bg-blue-soft/55 rounded-br-sm" : ""
+            } ${
+              !isMine && message.localState !== "failed" ? "border-border-soft bg-surface dark:border-border-soft-dark dark:bg-surface-dark rounded-bl-sm" : ""
             }`}
           >
             <p className="text-sm leading-6 break-words whitespace-pre-wrap">
               {message.body.split(/!\[Image\]\((.*?)\)/).map((part: string, i: number) => {
                 if (i % 2 === 1) {
                   // eslint-disable-next-line @next/next/no-img-element
-                  return <img key={i} src={part} alt="Attachment" className="mt-2 max-h-60 w-auto rounded-xl object-contain border border-border-soft dark:border-border-soft-dark shadow-sm" />;
+                  return <img key={i} src={part} alt="Attachment" loading="lazy" className="mt-2 max-h-60 w-auto rounded-xl object-contain border border-border-soft dark:border-border-soft-dark shadow-sm" />;
                 }
                 return part;
               })}
@@ -132,13 +173,25 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
             ) : null}
           </div>
           <div className={`mt-1 flex items-center gap-1 ${isMine ? "justify-end" : "justify-start"}`}>
-            <time className="px-1 text-[11px] font-medium text-muted/80 dark:text-muted-dark">
-              {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(message.createdAt))}
+            <time className="px-1 text-[11px] font-medium text-muted/80 dark:text-muted-dark" suppressHydrationWarning>
+              {mounted
+                ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(message.createdAt))
+                : ""}
             </time>
             {isMine ? (
-              <span className="text-[10px] font-bold text-blue-strong mr-1">
-                {hasBeenRead ? "✓✓" : "✓"}
-              </span>
+              message.localState === "pending" ? (
+                <span className="text-[10px] text-muted-strong dark:text-muted mr-1 animate-pulse">
+                  Sending...
+                </span>
+              ) : message.localState === "failed" ? (
+                <span className="text-[10px] font-bold text-danger mr-1" title="Failed to send">
+                  ✕ Failed
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-blue-strong mr-1">
+                  {hasBeenRead ? "✓✓" : "✓"}
+                </span>
+              )
             ) : null}
             <button className="grid size-8 place-items-center rounded-full text-muted opacity-80 hover:bg-panel" onClick={() => onToggleReaction(message.id, "❤️")}>
               <SmilePlus size={15} />
@@ -155,7 +208,11 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
   return (
     prev.message.id === next.message.id &&
     prev.message.updatedAt === next.message.updatedAt &&
-    prev.reactions === next.reactions &&
-    prev.readReceipts === next.readReceipts
+    prev.message.localState === next.message.localState &&
+    prev.virtualRow.start === next.virtualRow.start &&
+    prev.virtualRow.size === next.virtualRow.size &&
+    prev.currentUserId === next.currentUserId &&
+    checkReactionsEqual(prev.reactions, next.reactions) &&
+    checkReceiptsEqual(prev.readReceipts, next.readReceipts)
   );
 });

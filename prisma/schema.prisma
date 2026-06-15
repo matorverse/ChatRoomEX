@@ -49,7 +49,6 @@ model User {
   messages      Message[]
   reactions     Reaction[]
   notifications Notification[]
-  presence      RoomPresence[]
   readReceipts  ReadReceipt[]
   auditLogs     AuditLog[]
 
@@ -86,7 +85,6 @@ model Room {
   members       RoomMember[]
   messages      Message[]
   threads       Thread[]
-  presence      RoomPresence[]
   notifications Notification[]
   readReceipts  ReadReceipt[]
   auditLogs     AuditLog[]
@@ -198,20 +196,6 @@ model Notification {
   @@map("notifications")
 }
 
-model RoomPresence {
-  id           String         @id @default(uuid()) @db.Uuid
-  roomId       String         @db.Uuid
-  userId       String         @db.Uuid
-  status       PresenceStatus @default(online)
-  lastSeenAt   DateTime       @default(now()) @db.Timestamptz(6)
-  activeSocket String?        @db.VarChar(120)
-  room         Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([roomId, userId])
-  @@index([roomId, status, lastSeenAt])
-  @@map("room_presence")
-}
 
 model AuditLog {
   id        String   @id @default(uuid()) @db.Uuid

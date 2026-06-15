@@ -13,7 +13,14 @@ export async function POST(request: Request) {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const parsed = dmSchema.safeParse(await request.json());
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const parsed = dmSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "Invalid target user" }, { status: 400 });
 
   if (session.userId === parsed.data.targetUserId) {
@@ -21,24 +28,27 @@ export async function POST(request: Request) {
   }
 
   // Check if a DM room already exists between these two users
-  const existingRooms = await prisma.room.findMany({
+  const existingDm = await prisma.room.findFirst({
     where: {
       isPrivate: true,
-      members: { some: { userId: session.userId } }
+      AND: [
+        { members: { some: { userId: session.userId } } },
+        { members: { some: { userId: parsed.data.targetUserId } } }
+      ]
     },
-    include: { members: true }
+    select: { id: true }
   });
 
-  const existingDm = existingRooms.find((room) => room.members.some((m) => m.userId === parsed.data.targetUserId));
   if (existingDm) {
     return NextResponse.json({ roomId: existingDm.id });
   }
 
-  // Find target user name to set the room name
-  const targetUser = await prisma.user.findUnique({ where: { id: parsed.data.targetUserId } });
+  // Find target user name and current user name in parallel to set the room name
+  const [targetUser, currentUser] = await Promise.all([
+    prisma.user.findUnique({ where: { id: parsed.data.targetUserId } }),
+    prisma.user.findUnique({ where: { id: session.userId } })
+  ]);
   if (!targetUser) return NextResponse.json({ error: "User not found" }, { status: 404 });
-
-  const currentUser = await prisma.user.findUnique({ where: { id: session.userId } });
 
   // Create new DM room
   const room = await prisma.$transaction(async (tx) => {

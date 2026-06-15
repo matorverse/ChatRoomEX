@@ -57,8 +57,11 @@ export async function markAcked(clientNonce: string, message: ChatMessage) {
 }
 
 export async function markFailed(clientNonce: string) {
-  const pending = await offlineDb.messages.where("clientNonce").equals(clientNonce).first();
-  if (pending) {
-    await offlineDb.messages.update(pending.id, { localState: "failed" });
-  }
+  await offlineDb.transaction("rw", offlineDb.messages, offlineDb.queue, async () => {
+    const pending = await offlineDb.messages.where("clientNonce").equals(clientNonce).first();
+    if (pending) {
+      await offlineDb.messages.update(pending.id, { localState: "failed" });
+    }
+    await offlineDb.queue.delete(clientNonce);
+  });
 }

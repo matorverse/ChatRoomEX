@@ -18,11 +18,34 @@ type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 export function useChatSocket(roomId: string, currentUserId: string, accessToken: string, initialMessages: ChatMessage[]) {
   const [messages, setMessages] = useState(() => initialMessages);
   const [connected, setConnected] = useState(false);
-  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
   const [presence, setPresence] = useState<PresenceState[]>([]);
   const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
   const [readReceipts, setReadReceipts] = useState<Record<string, string[]>>({});
   const socketRef = useRef<ChatSocket | null>(null);
+  const isFirstConnectRef = useRef(true);
+
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [roomId, initialMessages]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setTypingUsers((current) => {
+        let changed = false;
+        const next = { ...current };
+        for (const [userId, expiresAt] of Object.entries(next)) {
+          if (expiresAt <= now) {
+            delete next[userId];
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -33,9 +56,22 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       .reverse()
       .limit(200)
       .sortBy("createdAt")
-      .then((cached) => {
+      .then(async (cached) => {
         if (mounted && cached.length > 0) {
           setMessages(cached.reverse());
+        }
+
+        try {
+          const allRoomMessages = await offlineDb.messages
+            .where("roomId")
+            .equals(roomId)
+            .sortBy("createdAt");
+          if (allRoomMessages.length > 200) {
+            const toDelete = allRoomMessages.slice(0, allRoomMessages.length - 200);
+            await offlineDb.messages.bulkDelete(toDelete.map((m) => m.id));
+          }
+        } catch (err) {
+          console.error("Failed to prune IndexedDB messages", err);
         }
       });
 
@@ -55,10 +91,29 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
 
     socketRef.current = socket;
 
+    const isFirst = isFirstConnectRef.current;
+    isFirstConnectRef.current = false;
+
     socket.on("connect", () => {
       setConnected(true);
       socket.emit("room:join", { roomId }, () => undefined);
       void flushOfflineQueue(socket, roomId);
+
+      if (!isFirst) {
+        fetch(`/api/rooms/${roomId}/messages?limit=50`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.messages && Array.isArray(data.messages)) {
+              setMessages((current) => reconcileMessages(current, data.messages));
+              void offlineDb.messages.bulkPut(
+                data.messages.map((message: any) => ({ ...message, localState: "synced" as const }))
+              );
+            }
+          })
+          .catch((err) => console.error("Failed to fetch missed messages on reconnect", err));
+      }
     });
 
     socket.on("disconnect", () => setConnected(false));
@@ -69,26 +124,44 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
     });
 
     socket.on("message:batch", async ({ messages: batch }) => {
-      setMessages((current) => reconcileMessages(current, batch));
-      await offlineDb.messages.bulkPut(batch.map((message) => ({ ...message, localState: "synced" as const })));
+      const syncedBatch = batch.map((m) => ({ ...m, localState: "synced" as const }));
+      setMessages((current) => reconcileMessages(current, syncedBatch));
+      const nonces = batch.map((m) => m.clientNonce).filter(Boolean) as string[];
+      await offlineDb.transaction("rw", offlineDb.messages, offlineDb.queue, async () => {
+        if (nonces.length > 0) {
+          const pending = await offlineDb.messages.where("clientNonce").anyOf(nonces).toArray();
+          if (pending.length > 0) {
+            await offlineDb.messages.bulkDelete(pending.map((m) => m.id));
+          }
+          await offlineDb.queue.bulkDelete(nonces);
+        }
+        await offlineDb.messages.bulkPut(syncedBatch);
+      });
     });
 
     socket.on("message:ack", async ({ clientNonce, message }) => {
-      setMessages((current) => current.map((item) => (item.clientNonce === clientNonce ? message : item)));
+      setMessages((current) =>
+        current.map((item) => (item.clientNonce === clientNonce ? { ...message, localState: "synced" as const } : item))
+      );
       await markAcked(clientNonce, message);
     });
 
     socket.on("message:rollback", async ({ clientNonce }) => {
-      setMessages((current) => current.filter((item) => item.clientNonce !== clientNonce));
+      setMessages((current) =>
+        current.map((item) => (item.clientNonce === clientNonce ? { ...item, localState: "failed" as const } : item))
+      );
       await markFailed(clientNonce);
     });
 
     socket.on("typing:update", ({ userId, isTyping }) => {
       setTypingUsers((current) => {
-        const next = new Set(current);
-        if (isTyping) next.add(userId);
-        else next.delete(userId);
-        return [...next].slice(0, 4);
+        const next = { ...current };
+        if (isTyping) {
+          next[userId] = Date.now() + 8000;
+        } else {
+          delete next[userId];
+        }
+        return next;
       });
     });
 
@@ -127,17 +200,25 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
     };
   }, [accessToken, roomId]);
 
+  const activeTypingUsers = useMemo(() => {
+    const now = Date.now();
+    return Object.entries(typingUsers)
+      .filter(([_, expiresAt]) => expiresAt > now)
+      .map(([userId]) => userId)
+      .slice(0, 4);
+  }, [typingUsers]);
+
   const api = useMemo(
     () => ({
       connected,
       messages,
-      typingUsers,
+      typingUsers: activeTypingUsers,
       presence,
       reactions,
       readReceipts,
       sendMessage: async (body: string, threadId?: string, parentId?: string) => {
         const clientNonce = crypto.randomUUID();
-        const optimistic: ChatMessage = {
+        const optimistic: ChatMessage & { localState?: "pending" | "synced" | "failed" } = {
           id: crypto.randomUUID(),
           roomId,
           authorId: currentUserId,
@@ -146,7 +227,8 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
           parentId: parentId ?? null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          clientNonce
+          clientNonce,
+          localState: "pending"
         };
         const input: SendMessageInput = { roomId, body, clientNonce, threadId, parentId };
 
@@ -160,16 +242,30 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       toggleReaction: (messageId: string, emoji: string) => socketRef.current?.emit("reaction:toggle", { roomId, messageId, emoji }),
       markReadBatch: (messageIds: string[]) => socketRef.current?.emit("read:mark:batch", { roomId, messageIds })
     }),
-    [connected, currentUserId, messages, roomId, typingUsers, presence, reactions, readReceipts]
+    [connected, currentUserId, messages, roomId, activeTypingUsers, presence, reactions, readReceipts]
   );
 
   return api;
 }
 
 function reconcileMessages(current: ChatMessage[], incoming: ChatMessage[]) {
-  const map = new Map(current.map((message) => [message.id, message]));
-  for (const message of incoming) {
-    map.set(message.id, message);
+  const nonceMap = new Map<string, ChatMessage>();
+  const idMap = new Map<string, ChatMessage>();
+
+  for (const msg of current) {
+    if (msg.clientNonce) {
+      nonceMap.set(msg.clientNonce, msg);
+    }
+    idMap.set(msg.id, msg);
   }
-  return [...map.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  for (const msg of incoming) {
+    if (msg.clientNonce && nonceMap.has(msg.clientNonce)) {
+      const oldMsg = nonceMap.get(msg.clientNonce)!;
+      idMap.delete(oldMsg.id);
+    }
+    idMap.set(msg.id, msg);
+  }
+
+  return [...idMap.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
