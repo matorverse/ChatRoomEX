@@ -22,6 +22,9 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
   const [presence, setPresence] = useState<PresenceState[]>([]);
   const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
   const [readReceipts, setReadReceipts] = useState<Record<string, string[]>>({});
+  const [pms, setPms] = useState<any[]>([]);
+  const [activeChallenge, setActiveChallenge] = useState<any | null>(null);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const socketRef = useRef<ChatSocket | null>(null);
   const isFirstConnectRef = useRef(true);
 
@@ -211,6 +214,39 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
         return changed ? next : current;
       });
     });
+    socket.on("pm:new", (payload) => {
+      setPms((current) => [...current, payload]);
+    });
+
+    socket.on("challenge:invited", (payload) => {
+      setActiveChallenge({
+        challengeId: payload.challengeId,
+        challengerId: payload.challengerId,
+        challengerName: payload.challengerName,
+        status: "pending",
+        log: ["You have been challenged to a Battle!"]
+      });
+    });
+
+    socket.on("challenge:update", (payload) => {
+      setActiveChallenge((current: any) => {
+        if (!current || current.challengeId === payload.challengeId) {
+          return {
+            challengeId: payload.challengeId,
+            challengerId: payload.challengerId,
+            defenderId: payload.defenderId,
+            status: payload.status,
+            winnerId: payload.winnerId,
+            log: payload.log
+          };
+        }
+        return current;
+      });
+    });
+
+    socket.on("leaderboard:update", ({ standings }) => {
+      setLeaderboard(standings);
+    });
 
     return () => {
       socket.close();
@@ -228,6 +264,12 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
 
   const sendMessage = useCallback(
     async (body: string, threadId?: string, parentId?: string) => {
+      const isCommand = body.startsWith("/") && !body.startsWith("/shrug") && !body.startsWith("/me ");
+      if (isCommand) {
+        socketRef.current?.emit("message:send", { roomId, body, clientNonce: crypto.randomUUID(), threadId, parentId }, () => undefined);
+        return;
+      }
+
       const clientNonce = crypto.randomUUID();
       const optimistic: ChatMessage & { localState?: "pending" | "synced" | "failed" } = {
         id: crypto.randomUUID(),
@@ -267,6 +309,72 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
     [roomId]
   );
 
+  const sendPM = useCallback((receiverId: string, body: string) => {
+    socketRef.current?.emit("pm:send", { receiverId, body });
+  }, []);
+
+  const getPMHistory = useCallback((otherUserId: string): Promise<any[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit("pm:history:get", { otherUserId }, (res: any) => {
+        if (res && "messages" in res) {
+          resolve(res.messages);
+        } else {
+          resolve([]);
+        }
+      });
+    });
+  }, []);
+
+  const inspectPMHistory = useCallback((userId1: string, userId2: string): Promise<any[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit("pm:admin:inspect", { userId1, userId2 }, (res: any) => {
+        if (res && "messages" in res) {
+          resolve(res.messages);
+        } else {
+          resolve([]);
+        }
+      });
+    });
+  }, []);
+
+  const sendChallenge = useCallback((defenderId: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit("challenge:send", { defenderId }, (res: any) => {
+        if (res && "challengeId" in res) {
+          setActiveChallenge({
+            challengeId: res.challengeId,
+            challengerId: currentUserId,
+            defenderId,
+            status: "pending",
+            log: ["Challenge sent. Waiting for response..."]
+          });
+          resolve(res.challengeId);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  }, [currentUserId]);
+
+  const respondChallenge = useCallback((challengeId: string, action: "accept" | "decline") => {
+    socketRef.current?.emit("challenge:respond", { challengeId, action });
+    if (action === "decline") {
+      setActiveChallenge(null);
+    }
+  }, []);
+
+  const makeChallengeTurn = useCallback((challengeId: string, choice: "attack" | "defend" | "dodge") => {
+    socketRef.current?.emit("challenge:turn", { challengeId, choice });
+  }, []);
+
+  const updateSettings = useCallback((blockChallenges: boolean, blockPMs: boolean, customAvatarUrl?: string, avatarUrl?: string) => {
+    return new Promise<boolean>((resolve) => {
+      socketRef.current?.emit("settings:update", { blockChallenges, blockPMs, customAvatarUrl, avatarUrl }, (res: any) => {
+        resolve(res && "ok" in res);
+      });
+    });
+  }, []);
+
   const api = useMemo(
     () => ({
       connected,
@@ -275,10 +383,20 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       presence,
       reactions,
       readReceipts,
+      pms,
+      activeChallenge,
+      leaderboard,
       sendMessage,
       setTyping,
       toggleReaction,
-      markReadBatch
+      markReadBatch,
+      sendPM,
+      getPMHistory,
+      inspectPMHistory,
+      sendChallenge,
+      respondChallenge,
+      makeChallengeTurn,
+      updateSettings
     }),
     [
       connected,
@@ -287,10 +405,20 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       presence,
       reactions,
       readReceipts,
+      pms,
+      activeChallenge,
+      leaderboard,
       sendMessage,
       setTyping,
       toggleReaction,
-      markReadBatch
+      markReadBatch,
+      sendPM,
+      getPMHistory,
+      inspectPMHistory,
+      sendChallenge,
+      respondChallenge,
+      makeChallengeTurn,
+      updateSettings
     ]
   );
 

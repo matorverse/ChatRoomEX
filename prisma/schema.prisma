@@ -18,6 +18,8 @@ enum RoomRole {
   owner
   admin
   moderator
+  driver
+  voice
   member
   guest
 }
@@ -36,21 +38,33 @@ enum PresenceStatus {
 }
 
 model User {
-  id            String         @id @default(uuid()) @db.Uuid
-  handle        String         @unique @db.VarChar(32)
-  displayName   String         @db.VarChar(80)
-  passwordHash  String?        @db.VarChar(256)
-  avatarUrl     String?
-  locale        String         @default("en")
-  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
-  sessions      AuthSession[]
-  memberships   RoomMember[]
-  messages      Message[]
-  reactions     Reaction[]
-  notifications Notification[]
-  readReceipts  ReadReceipt[]
-  auditLogs     AuditLog[]
+  id                 String            @id @default(uuid()) @db.Uuid
+  handle             String            @unique @db.VarChar(32)
+  displayName        String            @db.VarChar(80)
+  passwordHash       String?           @db.VarChar(256)
+  avatarUrl          String?
+  locale             String            @default("en")
+  globalRole         String            @default("user") // "admin", "moderator", "driver", "voice", "user"
+  bannedUntil        DateTime?         @db.Timestamptz(6)
+  mutedUntil         DateTime?         @db.Timestamptz(6)
+  blockChallenges    Boolean           @default(false)
+  blockPMs           Boolean           @default(false)
+  customAvatarUrl    String?
+  createdAt          DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(6)
+  sessions           AuthSession[]
+  memberships        RoomMember[]
+  messages           Message[]
+  reactions          Reaction[]
+  notifications      Notification[]
+  readReceipts       ReadReceipt[]
+  auditLogs          AuditLog[]
+  points             UserPoints?
+  roomPunishments    RoomPunishment[]
+  sentPMs            PrivateMessage[]  @relation("SentPMs")
+  receivedPMs        PrivateMessage[]  @relation("ReceivedPMs")
+  challengerBattles  BattleChallenge[] @relation("Challenger")
+  defenderBattles    BattleChallenge[] @relation("Defender")
 
   @@index([displayName])
   @@map("users")
@@ -73,21 +87,23 @@ model AuthSession {
 }
 
 model Room {
-  id            String         @id @default(uuid()) @db.Uuid
-  slug          String         @unique @db.VarChar(64)
-  name          String         @db.VarChar(100)
-  type          RoomType       @default(text)
-  description   String?        @db.VarChar(240)
-  isPrivate     Boolean        @default(false)
-  createdById   String         @db.Uuid
-  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
-  members       RoomMember[]
-  messages      Message[]
-  threads       Thread[]
-  notifications Notification[]
-  readReceipts  ReadReceipt[]
-  auditLogs     AuditLog[]
+  id              String           @id @default(uuid()) @db.Uuid
+  slug            String           @unique @db.VarChar(64)
+  name            String           @db.VarChar(100)
+  type            RoomType         @default(text)
+  description     String?          @db.VarChar(240)
+  isPrivate       Boolean          @default(false)
+  createdById     String           @db.Uuid
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(6)
+  members         RoomMember[]
+  messages        Message[]
+  threads         Thread[]
+  notifications   Notification[]
+  readReceipts    ReadReceipt[]
+  auditLogs       AuditLog[]
+  tournaments     Tournament[]
+  roomPunishments RoomPunishment[]
 
   @@index([type, updatedAt])
   @@map("rooms")
@@ -211,4 +227,68 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([roomId, createdAt])
   @@map("audit_logs")
+}
+
+model RoomPunishment {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  userId    String   @db.Uuid
+  type      String   // "ban", "mute"
+  expiresAt DateTime? @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId, type])
+  @@map("room_punishments")
+}
+
+model PrivateMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  senderId   String   @db.Uuid
+  receiverId String   @db.Uuid
+  body       String   @db.VarChar(4000)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  sender     User     @relation("SentPMs", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User     @relation("ReceivedPMs", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, receiverId, createdAt])
+  @@map("private_messages")
+}
+
+model BattleChallenge {
+  id           String   @id @default(uuid()) @db.Uuid
+  challengerId String   @db.Uuid
+  defenderId   String   @db.Uuid
+  status       String   // "pending", "accepted", "declined", "completed"
+  winnerId     String?  @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  challenger   User     @relation("Challenger", fields: [challengerId], references: [id], onDelete: Cascade)
+  defender     User     @relation("Defender", fields: [defenderId], references: [id], onDelete: Cascade)
+
+  @@map("battle_challenges")
+}
+
+model UserPoints {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid @unique
+  points    Int      @default(0)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_points")
+}
+
+model Tournament {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  name      String   @db.VarChar(100)
+  status    String   // "active", "completed", "cancelled"
+  winnerId  String?  @db.Uuid
+  secondId  String?  @db.Uuid
+  thirdId   String?  @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("tournaments")
 }

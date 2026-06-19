@@ -57,6 +57,11 @@ export type ServerToClientEvents = {
   "read:receipt": (payload: { roomId: string; userId: string; messageId: string; readAt: string }) => void;
   "read:receipt:batch": (payload: { roomId: string; userId: string; messageIds: string[]; readAt: string }) => void;
   "sync:required": (payload: { roomId: string; since?: string }) => void;
+  "pm:new": (payload: { id: string; senderId: string; receiverId: string; body: string; createdAt: string }) => void;
+  "challenge:invited": (payload: { challengeId: string; challengerId: string; challengerName: string }) => void;
+  "challenge:update": (payload: { challengeId: string; status: string; challengerId: string; defenderId: string; winnerId?: string; log: string[] }) => void;
+  "system:alert": (payload: { roomId: string; body: string; type: "info" | "promotion" | "punishment"; createdAt: string }) => void;
+  "leaderboard:update": (payload: { standings: Array<{ userId: string; displayName: string; points: number }> }) => void;
 };
 
 export type ClientToServerEvents = {
@@ -66,6 +71,13 @@ export type ClientToServerEvents = {
   "reaction:toggle": (payload: ReactionInput) => void;
   "read:mark:batch": (payload: { roomId: string; messageIds: string[] }) => void;
   "sync:offline": (payload: { roomId: string; queued: SendMessageInput[] }, ack: Ack<{ accepted: number; failedNonce?: string; rollbackReason?: string }>) => void;
+  "pm:send": (payload: { receiverId: string; body: string }) => void;
+  "pm:history:get": (payload: { otherUserId: string }, ack: Ack<{ messages: any[] }>) => void;
+  "pm:admin:inspect": (payload: { userId1: string; userId2: string }, ack: Ack<{ messages: any[] }>) => void;
+  "challenge:send": (payload: { defenderId: string }, ack: Ack<{ challengeId: string }>) => void;
+  "challenge:respond": (payload: { challengeId: string; action: "accept" | "decline" }) => void;
+  "challenge:turn": (payload: { challengeId: string; choice: "attack" | "defend" | "dodge" }) => void;
+  "settings:update": (payload: { blockChallenges: boolean; blockPMs: boolean; customAvatarUrl?: string; avatarUrl?: string }, ack: Ack<{ ok: true }>) => void;
 };
 
 export type InterServerEvents = {

@@ -5,40 +5,54 @@ const prisma = new PrismaClient();
 
 async function main() {
   const passwordHash = await hashPassword("ChangeMeInProduction123!");
+  
+  // Create a demo user who is also a Global Admin
   const user = await prisma.user.upsert({
     where: { handle: "demo" },
-    update: {},
+    update: { globalRole: "admin" },
     create: {
       handle: "demo",
       displayName: "Demo Guide",
-      passwordHash
+      passwordHash,
+      globalRole: "admin"
     }
   });
 
-  const room = await prisma.room.upsert({
-    where: { slug: "sanctuary" },
-    update: {},
-    create: {
-      slug: "sanctuary",
-      name: "Sanctuary",
-      description: "A calm realtime room for product validation.",
-      createdById: user.id
-    }
-  });
+  // Seed Default Rooms
+  const defaultRooms = [
+    { slug: "lobby", name: "Lobby", description: "Lobby chatroom: Talk, learn, and socialize." },
+    { slug: "help", name: "Help", description: "Help chatroom: Ask questions and get support." },
+    { slug: "tournaments", name: "Tournaments", description: "Tournaments chatroom: Where all the matches happen." },
+    { slug: "malayalam", name: "Malayalam", description: "Speak and chat in Malayalam." }
+  ];
 
-  await prisma.roomMember.upsert({
-    where: { roomId_userId: { roomId: room.id, userId: user.id } },
-    update: { role: "owner", canModerate: true },
-    create: { roomId: room.id, userId: user.id, role: "owner", canModerate: true }
-  });
+  for (const r of defaultRooms) {
+    const room = await prisma.room.upsert({
+      where: { slug: r.slug },
+      update: {},
+      create: {
+        slug: r.slug,
+        name: r.name,
+        description: r.description,
+        createdById: user.id
+      }
+    });
 
-  await prisma.message.createMany({
-    data: [
-      { roomId: room.id, authorId: user.id, body: "Welcome to ChatRoomEX. This seed verifies chat hydration." },
-      { roomId: room.id, authorId: user.id, body: "Try sending a message, toggling reactions, and reconnecting." }
-    ],
-    skipDuplicates: true
-  });
+    await prisma.roomMember.upsert({
+      where: { roomId_userId: { roomId: room.id, userId: user.id } },
+      update: { role: "owner", canModerate: true },
+      create: { roomId: room.id, userId: user.id, role: "owner", canModerate: true }
+    });
+
+    // Create a greeting message
+    await prisma.message.create({
+      data: {
+        roomId: room.id,
+        authorId: user.id,
+        body: `Welcome to the ${r.name} room!`
+      }
+    });
+  }
 }
 
 main()

@@ -4,21 +4,51 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion } from "framer-motion";
 import { CornerDownRight, SmilePlus } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage } from "@/lib/realtime/events";
+import type { ChatMessage, PresenceState } from "@/lib/realtime/events";
+
+type Member = {
+  id: string;
+  displayName: string;
+  handle: string;
+  avatarUrl: string | null;
+  globalRole: string;
+  roomRole: string;
+};
 
 type Props = {
   messages: ChatMessage[];
   currentUserId: string;
   onReply: (message: ChatMessage) => void;
   onAuthorPress: (userId: string) => void;
-  members: { id: string; displayName: string; avatarUrl: string | null }[];
+  members: Member[];
+  presence: PresenceState[];
   reactions: Record<string, Record<string, string[]>>;
   readReceipts: Record<string, string[]>;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onMarkReadBatch: (messageIds: string[]) => void;
 };
 
-export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPress, members, reactions, readReceipts, onToggleReaction, onMarkReadBatch }: Props) {
+function getRankPrefix(globalRole?: string, roomRole?: string): string {
+  if (globalRole === "admin") return "~";
+  if (roomRole === "owner") return "#";
+  if (globalRole === "moderator" || roomRole === "moderator") return "@";
+  if (globalRole === "driver" || roomRole === "driver") return "%";
+  if (globalRole === "voice" || roomRole === "voice") return "+";
+  return "";
+}
+
+export function VirtualizedChat({
+  messages,
+  currentUserId,
+  onReply,
+  onAuthorPress,
+  members,
+  presence,
+  reactions,
+  readReceipts,
+  onToggleReaction,
+  onMarkReadBatch
+}: Props) {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
@@ -45,6 +75,10 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
     return new Map(members.map((m) => [m.id, m]));
   }, [members]);
 
+  const me = membersMap.get(currentUserId);
+  const myName = me?.displayName;
+  const myHandle = me?.handle;
+
   useEffect(() => {
     rowVirtualizer.scrollToIndex(messages.length - 1, { align: "end" });
   }, [messages.length, rowVirtualizer]);
@@ -55,6 +89,8 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
           const message = messages[virtualRow.index];
           const author = membersMap.get(message.authorId);
+          const isOnline = presence.some((p) => p.userId === message.authorId && p.status === "online");
+
           return (
             <MessageRow
               key={message.id}
@@ -62,12 +98,15 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
               virtualRow={virtualRow}
               currentUserId={currentUserId}
               author={author}
+              isOnline={isOnline}
               reactions={reactions[message.id] ?? EMPTY_REACTIONS}
               readReceipts={readReceipts[message.id] ?? EMPTY_RECEIPTS}
               onReply={onReply}
               onAuthorPress={onAuthorPress}
               onToggleReaction={onToggleReaction}
               onMarkRead={handleMarkRead}
+              myName={myName}
+              myHandle={myHandle}
             />
           );
         })}
@@ -106,9 +145,22 @@ function checkReceiptsEqual(prev: string[], next: string[]) {
   return true;
 }
 
-const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId, author, reactions, readReceipts, onReply, onAuthorPress, onToggleReaction, onMarkRead }: any) {
+const MessageRow = memo(function MessageRow({
+  message,
+  virtualRow,
+  currentUserId,
+  author,
+  isOnline,
+  reactions,
+  readReceipts,
+  onReply,
+  onAuthorPress,
+  onToggleReaction,
+  onMarkRead,
+  myName,
+  myHandle
+}: any) {
   const isMine = message.authorId === currentUserId;
-  const displayName = author?.displayName ?? message.authorId;
   const isReadByMe = readReceipts.includes(currentUserId);
   const hasBeenRead = readReceipts.some((id: string) => id !== currentUserId);
   const [mounted, setMounted] = useState(false);
@@ -123,6 +175,49 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
     }
   }, [message.id, isMine, isReadByMe, onMarkRead]);
 
+  const isPromotion = message.body.startsWith("[PROMOTION]");
+  const isSystem = message.body.startsWith("[SYSTEM]");
+  const isAlert = isPromotion || isSystem;
+
+  const hasMention = useMemo(() => {
+    if (isMine || isAlert) return false;
+    const bodyLower = message.body.toLowerCase();
+    const nameMatch = myName ? bodyLower.includes(myName.toLowerCase()) : false;
+    const handleMatch = myHandle ? bodyLower.includes(myHandle.toLowerCase()) : false;
+    return nameMatch || handleMatch;
+  }, [message.body, myName, myHandle, isMine, isAlert]);
+
+  useEffect(() => {
+    if (hasMention && Date.now() - new Date(message.createdAt).getTime() < 5000) {
+      try {
+        const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav");
+        audio.volume = 0.25;
+        audio.play().catch(() => {});
+      } catch (e) {}
+    }
+  }, [hasMention, message.createdAt]);
+
+  if (isAlert) {
+    const alertText = message.body.replace(/^\[(PROMOTION|SYSTEM)\]\s*/, "");
+    return (
+      <article
+        className="absolute left-0 top-0 w-full px-1 py-2 flex justify-center"
+        style={{ transform: `translateY(${virtualRow.start}px)` }}
+      >
+        <div className="mx-auto w-full max-w-xl rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs font-semibold text-amber-300 backdrop-blur-sm shadow-md">
+          📢 {alertText}
+        </div>
+      </article>
+    );
+  }
+
+  const rawDisplayName = author?.displayName ?? message.authorId;
+  const isSenderOnline = isOnline || message.authorId === currentUserId;
+  const displayName = isSenderOnline ? rawDisplayName : "Offline User";
+
+  const prefix = getRankPrefix(author?.globalRole, author?.roomRole);
+  const formattedName = prefix && isSenderOnline ? `${prefix}${displayName}` : displayName;
+
   return (
     <article className="absolute left-0 top-0 w-full px-1 py-2" style={{ transform: `translateY(${virtualRow.start}px)` }}>
       <motion.div
@@ -136,14 +231,21 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
       >
         {!isMine ? (
           <button
-            className="mt-1 grid size-9 shrink-0 place-items-center rounded-full bg-blue-soft/55 text-sm font-semibold"
-            onClick={() => onAuthorPress(message.authorId)}
+            className={`mt-1 grid size-9 shrink-0 place-items-center rounded-full text-sm font-semibold ${
+              isSenderOnline ? "bg-blue-soft/55" : "bg-muted-soft/40 cursor-not-allowed opacity-50"
+            }`}
+            onClick={() => isSenderOnline && onAuthorPress(message.authorId)}
+            disabled={!isSenderOnline}
           >
             {displayName.slice(0, 1).toUpperCase()}
           </button>
         ) : null}
         <div className={`group max-w-[82%] flex flex-col ${isMine ? "items-end" : "items-start"}`}>
-          {!isMine ? <span className="mb-1 ml-1 block text-xs font-medium text-muted-strong dark:text-muted">{displayName}</span> : null}
+          {!isMine ? (
+            <span className="mb-1 ml-1 block text-xs font-medium text-muted-strong dark:text-muted">
+              {formattedName}
+            </span>
+          ) : null}
           <div
             className={`rounded-2xl border px-4 py-3 shadow-sm relative transition-opacity duration-200 ${
               message.localState === "pending" ? "opacity-70" : ""
@@ -152,7 +254,11 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
             } ${
               isMine && message.localState !== "failed" ? "border-blue-soft bg-blue-soft/55 rounded-br-sm" : ""
             } ${
-              !isMine && message.localState !== "failed" ? "border-border-soft bg-surface dark:border-border-soft-dark dark:bg-surface-dark rounded-bl-sm" : ""
+              !isMine && message.localState !== "failed"
+                ? hasMention
+                  ? "border-amber-500/35 bg-amber-500/15 text-amber-200 rounded-bl-sm shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                  : "border-border-soft bg-surface dark:border-border-soft-dark dark:bg-surface-dark rounded-bl-sm"
+                : ""
             }`}
           >
             <p className="text-sm leading-6 break-words whitespace-pre-wrap">
@@ -217,6 +323,9 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
     prev.virtualRow.size === next.virtualRow.size &&
     prev.currentUserId === next.currentUserId &&
     prev.author === next.author &&
+    prev.isOnline === next.isOnline &&
+    prev.myName === next.myName &&
+    prev.myHandle === next.myHandle &&
     checkReactionsEqual(prev.reactions, next.reactions) &&
     checkReceiptsEqual(prev.readReceipts, next.readReceipts)
   );

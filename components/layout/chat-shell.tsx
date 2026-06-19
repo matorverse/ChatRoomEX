@@ -56,7 +56,10 @@ export async function ChatShell({ roomId: targetRoomId }: { roomId?: string }) {
   const [roomMembers, messages, unreadCount, unreadCounts] = await Promise.all([
     prisma.roomMember.findMany({
       where: { roomId: activeRoomId },
-      select: { user: { select: { id: true, displayName: true, avatarUrl: true } } }
+      select: {
+        role: true,
+        user: { select: { id: true, displayName: true, handle: true, avatarUrl: true, globalRole: true, customAvatarUrl: true, blockChallenges: true, blockPMs: true } }
+      }
     }),
     userRooms.length > 0
       ? prisma.message.findMany({
@@ -100,7 +103,16 @@ export async function ChatShell({ roomId: targetRoomId }: { roomId?: string }) {
       unreadCount={unreadCount}
       unreadCounts={unreadCounts}
       rooms={userRooms}
-      initialMembers={roomMembers.map((m) => m.user)}
+      initialMembers={roomMembers.map((m) => ({
+        id: m.user.id,
+        displayName: m.user.displayName,
+        handle: m.user.handle,
+        avatarUrl: m.user.customAvatarUrl || m.user.avatarUrl,
+        globalRole: m.user.globalRole,
+        roomRole: m.role,
+        blockChallenges: m.user.blockChallenges,
+        blockPMs: m.user.blockPMs
+      }))}
     />
   );
 }
