@@ -3,7 +3,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { motion } from "framer-motion";
 import { CornerDownRight, SmilePlus } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/realtime/events";
 
 type Props = {
@@ -41,6 +41,10 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
     }
   }, [onMarkReadBatch]);
 
+  const membersMap = useMemo(() => {
+    return new Map(members.map((m) => [m.id, m]));
+  }, [members]);
+
   useEffect(() => {
     rowVirtualizer.scrollToIndex(messages.length - 1, { align: "end" });
   }, [messages.length, rowVirtualizer]);
@@ -50,13 +54,14 @@ export function VirtualizedChat({ messages, currentUserId, onReply, onAuthorPres
       <div className="relative mx-auto w-full max-w-3xl" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
           const message = messages[virtualRow.index];
+          const author = membersMap.get(message.authorId);
           return (
             <MessageRow
               key={message.id}
               message={message}
               virtualRow={virtualRow}
               currentUserId={currentUserId}
-              members={members}
+              author={author}
               reactions={reactions[message.id] ?? EMPTY_REACTIONS}
               readReceipts={readReceipts[message.id] ?? EMPTY_RECEIPTS}
               onReply={onReply}
@@ -101,9 +106,8 @@ function checkReceiptsEqual(prev: string[], next: string[]) {
   return true;
 }
 
-const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId, members, reactions, readReceipts, onReply, onAuthorPress, onToggleReaction, onMarkRead }: any) {
+const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId, author, reactions, readReceipts, onReply, onAuthorPress, onToggleReaction, onMarkRead }: any) {
   const isMine = message.authorId === currentUserId;
-  const author = members.find((m: any) => m.id === message.authorId);
   const displayName = author?.displayName ?? message.authorId;
   const isReadByMe = readReceipts.includes(currentUserId);
   const hasBeenRead = readReceipts.some((id: string) => id !== currentUserId);
@@ -212,6 +216,7 @@ const MessageRow = memo(function MessageRow({ message, virtualRow, currentUserId
     prev.virtualRow.start === next.virtualRow.start &&
     prev.virtualRow.size === next.virtualRow.size &&
     prev.currentUserId === next.currentUserId &&
+    prev.author === next.author &&
     checkReactionsEqual(prev.reactions, next.reactions) &&
     checkReceiptsEqual(prev.readReceipts, next.readReceipts)
   );

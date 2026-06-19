@@ -82,6 +82,24 @@ async function authorizeRoom(userId: string, roomId: string) {
   return member;
 }
 
+async function authorizeRoomCached(socket: any, roomId: string) {
+  if (!socket.data.permissions) {
+    socket.data.permissions = new Map();
+  }
+  const now = Date.now();
+  const cached = socket.data.permissions.get(roomId);
+  if (cached && now - cached.timestamp < 30000) {
+    return cached.member;
+  }
+  const member = await authorizeRoom(socket.data.userId, roomId);
+  if (member) {
+    socket.data.permissions.set(roomId, { member, timestamp: now });
+  } else {
+    socket.data.permissions.delete(roomId);
+  }
+  return member;
+}
+
 io.on("connection", (socket) => {
   log.info({ socketId: socket.id, userId: socket.data.userId }, "socket connected");
   try {
@@ -92,7 +110,7 @@ io.on("connection", (socket) => {
 
   socket.on("room:join", async ({ roomId }, ack) => {
     try {
-      const member = await authorizeRoom(socket.data.userId, roomId);
+      const member = await authorizeRoomCached(socket, roomId);
       if (!member) {
         ack({ error: "Forbidden" });
         return;
@@ -128,7 +146,7 @@ io.on("connection", (socket) => {
       }
 
       const input = parsed.data;
-      const member = await authorizeRoom(socket.data.userId, input.roomId);
+      const member = await authorizeRoomCached(socket, input.roomId);
       if (!member?.canPost) {
         socket.emit("message:rollback", { clientNonce: input.clientNonce, reason: "You cannot post in this room." });
         ack({ error: "Forbidden" });
@@ -206,7 +224,7 @@ io.on("connection", (socket) => {
     try {
       const parsed = reactionSchema.safeParse(raw);
       if (!parsed.success) return;
-      const member = await authorizeRoom(socket.data.userId, parsed.data.roomId);
+      const member = await authorizeRoomCached(socket, parsed.data.roomId);
       if (!member?.canReact) return;
 
       const existing = await prisma.reaction.findUnique({
@@ -245,7 +263,7 @@ io.on("connection", (socket) => {
 
   socket.on("read:mark:batch", async ({ roomId, messageIds }) => {
     try {
-      const member = await authorizeRoom(socket.data.userId, roomId);
+      const member = await authorizeRoomCached(socket, roomId);
       if (!member || messageIds.length === 0) return;
 
       const readAt = new Date();
@@ -256,14 +274,12 @@ io.on("connection", (socket) => {
       
       await clearUnread(socket.data.userId, roomId);
       
-      for (const messageId of messageIds) {
-        io.to(`room:${roomId}`).emit("read:receipt", {
-          roomId,
-          userId: socket.data.userId,
-          messageId,
-          readAt: readAt.toISOString()
-        });
-      }
+      io.to(`room:${roomId}`).emit("read:receipt:batch", {
+        roomId,
+        userId: socket.data.userId,
+        messageIds,
+        readAt: readAt.toISOString()
+      });
     } catch (err) {
       log.error({ err, roomId, userId: socket.data.userId }, "Error in read:mark:batch handler");
     }
@@ -271,7 +287,7 @@ io.on("connection", (socket) => {
 
   socket.on("sync:offline", async ({ roomId, queued }, ack) => {
     try {
-      const member = await authorizeRoom(socket.data.userId, roomId);
+      const member = await authorizeRoomCached(socket, roomId);
       if (!member?.canPost) {
         ack({ error: "Forbidden" });
         return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import type {
   ChatMessage,
@@ -189,8 +189,26 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
         if (!next[messageId]) next[messageId] = [];
         if (!next[messageId].includes(userId)) {
           next[messageId] = [...next[messageId], userId];
+          return next;
         }
-        return next;
+        return current;
+      });
+    });
+
+    socket.on("read:receipt:batch", ({ messageIds, userId }) => {
+      setReadReceipts((current) => {
+        const next = { ...current };
+        let changed = false;
+        for (const messageId of messageIds) {
+          if (!next[messageId]) {
+            next[messageId] = [];
+          }
+          if (!next[messageId].includes(userId)) {
+            next[messageId] = [...next[messageId], userId];
+            changed = true;
+          }
+        }
+        return changed ? next : current;
       });
     });
 
@@ -208,6 +226,47 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       .slice(0, 4);
   }, [typingUsers]);
 
+  const sendMessage = useCallback(
+    async (body: string, threadId?: string, parentId?: string) => {
+      const clientNonce = crypto.randomUUID();
+      const optimistic: ChatMessage & { localState?: "pending" | "synced" | "failed" } = {
+        id: crypto.randomUUID(),
+        roomId,
+        authorId: currentUserId,
+        body,
+        threadId: threadId ?? null,
+        parentId: parentId ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        clientNonce,
+        localState: "pending"
+      };
+      const input: SendMessageInput = { roomId, body, clientNonce, threadId, parentId };
+
+      setMessages((current) => [...current, optimistic]);
+      await offlineDb.messages.put({ ...optimistic, localState: "pending" });
+      await enqueueMessage(input);
+
+      socketRef.current?.emit("message:send", input, () => undefined);
+    },
+    [roomId, currentUserId]
+  );
+
+  const setTyping = useCallback(
+    (input: Omit<TypingInput, "roomId">) => socketRef.current?.emit("typing:set", { roomId, ...input }),
+    [roomId]
+  );
+
+  const toggleReaction = useCallback(
+    (messageId: string, emoji: string) => socketRef.current?.emit("reaction:toggle", { roomId, messageId, emoji }),
+    [roomId]
+  );
+
+  const markReadBatch = useCallback(
+    (messageIds: string[]) => socketRef.current?.emit("read:mark:batch", { roomId, messageIds }),
+    [roomId]
+  );
+
   const api = useMemo(
     () => ({
       connected,
@@ -216,33 +275,23 @@ export function useChatSocket(roomId: string, currentUserId: string, accessToken
       presence,
       reactions,
       readReceipts,
-      sendMessage: async (body: string, threadId?: string, parentId?: string) => {
-        const clientNonce = crypto.randomUUID();
-        const optimistic: ChatMessage & { localState?: "pending" | "synced" | "failed" } = {
-          id: crypto.randomUUID(),
-          roomId,
-          authorId: currentUserId,
-          body,
-          threadId: threadId ?? null,
-          parentId: parentId ?? null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          clientNonce,
-          localState: "pending"
-        };
-        const input: SendMessageInput = { roomId, body, clientNonce, threadId, parentId };
-
-        setMessages((current) => [...current, optimistic]);
-        await offlineDb.messages.put({ ...optimistic, localState: "pending" });
-        await enqueueMessage(input);
-
-        socketRef.current?.emit("message:send", input, () => undefined);
-      },
-      setTyping: (input: Omit<TypingInput, "roomId">) => socketRef.current?.emit("typing:set", { roomId, ...input }),
-      toggleReaction: (messageId: string, emoji: string) => socketRef.current?.emit("reaction:toggle", { roomId, messageId, emoji }),
-      markReadBatch: (messageIds: string[]) => socketRef.current?.emit("read:mark:batch", { roomId, messageIds })
+      sendMessage,
+      setTyping,
+      toggleReaction,
+      markReadBatch
     }),
-    [connected, currentUserId, messages, roomId, activeTypingUsers, presence, reactions, readReceipts]
+    [
+      connected,
+      messages,
+      activeTypingUsers,
+      presence,
+      reactions,
+      readReceipts,
+      sendMessage,
+      setTyping,
+      toggleReaction,
+      markReadBatch
+    ]
   );
 
   return api;

@@ -55,6 +55,7 @@ export type ServerToClientEvents = {
   "presence:update": (payload: { roomId: string; presence: PresenceState[] }) => void;
   "reaction:update": (payload: ReactionInput & { userId: string; op: "add" | "remove" }) => void;
   "read:receipt": (payload: { roomId: string; userId: string; messageId: string; readAt: string }) => void;
+  "read:receipt:batch": (payload: { roomId: string; userId: string; messageIds: string[]; readAt: string }) => void;
   "sync:required": (payload: { roomId: string; since?: string }) => void;
 };
 
